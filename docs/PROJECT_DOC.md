@@ -44,9 +44,6 @@
 | 链路 | 脚本 | 适用场景 | 代价 |
 |---|---|---|---|
 | WHIP 直推（**默认**） | `board/flex_srs.sh` | 码率 ≤ 2~3Mbps，要最低延迟 | 公网 UDP 丢包敏感 |
-| RTMP(TCP) 推流 | `board/flex_rtmp.sh` | 原画质 4~8Mbps，接受 1s 延迟 | 延迟略高 |
-| PC 本地 SRS 中转 | `board/flex_srs_pc.sh` | 板子无直接公网出口时 | 依赖 PC 中转服务存活 |
-| 局域网 mediamtx | `board/flex_whip.sh` | 局域网内调试（原方案） | 不可公网访问 |
 
 ---
 
@@ -100,9 +97,6 @@ gstreamer_delivery/               ← 仓库根 = 交付包根
 ├── board/                          开发板文件
 │   ├── gstreamer.sh                 → /etc/profile.d/gstreamer.sh   运行环境变量
 │   ├── flex_srs.sh                  → /usr/local/bin/                ★ 生产：WHIP 直推
-│   ├── flex_rtmp.sh                 → /usr/local/bin/                备选：RTMP(TCP) 推流
-│   ├── flex_srs_pc.sh               → /usr/local/bin/                备选：PC 中转
-│   ├── flex_whip.sh                 → /usr/local/bin/                局域网 mediamtx
 │   ├── whip_test.sh                 → /usr/local/bin/                彩条自测
 │   └── deploy_board.sh              PC 侧一键下发脚本
 │
@@ -248,7 +242,6 @@ a=ssrc:1111111 cname:whippush
 . /etc/profile.d/gstreamer.sh      # 非交互 SSH 必须先 source
 
 flex_srs.sh live1                  # 启动/重启 WHIP 推流（自动重试 + 媒体验证）
-flex_rtmp.sh live1                 # 切到 RTMP(TCP) 推流（高码率场景）
 ps | grep -E 'whip_push|ffmpeg'    # 查看链路进程
 tail -f /tmp/srs_whip.log          # 推流日志（PUSH_OK 即成功）
 tail -f /tmp/ffmpeg_bridge.log     # RTP 桥日志
@@ -292,11 +285,12 @@ ffmpeg -v error -i /tmp/c.flv -frames:v 1 -y /tmp/f.jpg
 | 板上日志 `connection established` 但 SRS `recv_bytes=0` | **假连接空推**（只收到 RTCP，无 RTP） | 重跑 `flex_srs.sh`（v3 已内置检测与重试） |
 | SRS answer 只有 131 字节、无 m-line | offer 缺 `a=ssrc` 行 | 用已修复的 `whip_push` 二进制 |
 | `no publisher for ssrc:xxxx` | offer SSRC 与 payloader 实际 SSRC 不一致 | 同上（启动前固定 SSRC=1111111） |
-| FLV/RTMP 输出 0 字节，API 显示 video 有 SPS | 码率过高，IDR 分片被丢包打碎 | 码率降到 ≤2Mbps，或改用 `flex_rtmp.sh` |
-| `whip_push ... bad HTTP response / HTTP 0` | SRS 偶发断连 | 重跑脚本即可（已内置 8 次重试） |
+| FLV/RTMP 输出 0 字节，API 显示 video 有 SPS | 码率过高，IDR 分片被丢包打碎 | 码率降到 ≤2Mbps |
+| `whip_push ... bad HTTP response / HTTP 0` | **旧 publish 会话还占着 stream**（SRS 约 37s 才回收已断的推流会话），新 WHIP POST 被直接拒 | `flex_srs.sh` 现已等会话释放后再推，冷启动首次即可成功 |
+| 推流进程在，但播放端无画面；`8554` 无监听 | **板子重启后 flex_vision 没起来**（`/tmp/ffmpeg_bridge.log` 里是 `Connection refused`） | 跑 `flex_start.sh`（含 PWM 同步前置），再跑 `flex_srs.sh` |
+| `flex_vision` 一启动就退出，日志 `media_flow_setup failed ret=0x80000004` | 缺 `ax_vsync_ctrl.ko`（sync_mode=2 的前置，每次上电都要重做） | `flex_start.sh` 已内置；手动见 §7.2 |
 | 板上 `curl: not found` | 板子未装 curl | 用 `busybox wget -q -O -` |
 | 浏览器 WebRTC 黑屏，FLV 正常 | UDP 8000 路径问题或 WHEP 未协商 | 用 `webrtc_live.html` 看诊断面板定位；临时用 FLV 页 |
-| 板上流量出不去（能 ping 网关） | PC 的 ICS NAT 转发卡死 | 管理员重启 `SharedAccess` 服务，或用 `tools/srs_relay.py` 用户态中转 |
 | RTSP 拉流 0 buffer 死锁 | `rtspsrc` 与 flex RTP 序号不兼容 | 必须走 ffmpeg RTP 桥 |
 | 板上 `LD_PRELOAD` 报找不到 glibc 符号 | 未加载兼容层（非交互 SSH 不读 profile） | `. /etc/profile.d/gstreamer.sh` |
 
@@ -304,6 +298,27 @@ ffmpeg -v error -i /tmp/c.flv -frames:v 1 -y /tmp/f.jpg
 
 1. **`pkill -f '关键字'` 会杀掉远端 shell 自己**（命令行含同样关键字）→ 改用 `kill <pid>` 或 `pkill -x <进程名>`。
 2. **busybox 下 `grep -o "recv_bytes":[0-9]*` 失效**（未加引号的 `[0-9]*` 触发 glob/解析异常）→ 改用 `tr ',' '\n' | grep recv_bytes | head -1 | tr -dc '0-9'`。
+
+### 7.2 板子重启后的启动顺序（每次上电必须执行）
+
+flex_vision 的 `sync_mode=2`（PWM 多机同步）依赖内核模块和两个寄存器，**掉电即失效**，这是"重启后没流"的头号原因：
+
+```sh
+# 1) PWM 同步前置（顺序不能换）
+ax_lookat 0x425023c -s 0x10003
+ax_lookat 0x4250248 -s 0x10003
+insmod /soc/ko/ax_vsync_ctrl.ko
+
+# 2) 起相机服务（会自动重跑上面的前置，并等 8554 就绪）
+/usr/local/bin/flex_start.sh
+
+# 3) 起推流（桥 + whip_push，含源检查/会话回收/增量校验）
+/usr/local/bin/flex_srs.sh live1
+```
+
+`flex_start.sh` 做的事：前置寄存器 → insmod → 带 `LD_LIBRARY_PATH=...:/soc/lib` 启动 flex_vision（**非交互 SSH 不读 `/etc/profile`，缺 `libax_sys.so` 会直接报错退出**）→ 轮询 8554 就绪，失败时打印日志里的 ERROR 行。
+
+> 部分板子还需把引脚复用成 PWM35：`ax_lookat 0x425083c -s 0x20003`。当前这块板不需要。
 
 ---
 
@@ -320,6 +335,8 @@ ffmpeg -v error -i /tmp/c.flv -frames:v 1 -y /tmp/f.jpg
 | 18:50 | 播放页交付（WebRTC + FLV 双通道） | ✅ PC 拉流 8s 2MB |
 | 19:30 | flex_srs.sh v3（假连接检测）上线 | ✅ 偶发失败可自动重试成功 |
 | 19:33 | 交付前巡检 | ✅ active=True、recv 59MB+、FLV 6s 1.48MB |
+| 21:32 | 板子重启后无流排查 | ✅ 根因：flex_vision 未启动 + 缺 `ax_vsync_ctrl.ko`；补前置后 `ch1` 恢复 2592×1944@30fps |
+| 21:45 | flex_srs.sh v4（源检查 / 会话回收等待 / 桥守护 / 增量校验） | ✅ 冷启动 try=0 成功，桥断开可在原会话续流 |
 
 ---
 
@@ -327,15 +344,15 @@ ffmpeg -v error -i /tmp/c.flv -frames:v 1 -y /tmp/f.jpg
 
 **限制**
 
-1. 所有 flex 通道共享 `[Encode] u32Bitrate` 配置——降码率对 ch0/1/3/4 全部生效。某路要高码率只能走 RTMP。
+1. 所有 flex 通道共享 `[Encode] u32Bitrate` 配置——降码率对 ch0/1/3/4 全部生效。
 2. 板端无法输出 720p（传感器原生 5MP，VENC 无缩放），画质受 2Mbps 压制偏软。
-3. WHIP 会话 30 秒无数据即被 SRS 销毁；推流中断需重新执行 `flex_srs.sh`（可加 systemd/看门狗）。
-4. `whip_push` 偶发 `HTTP 0`（SRS 侧瞬时断连），已用重试兜住，未从根上解决。
+3. WHIP 会话 30 秒无数据即被 SRS 销毁；v4 已让 RTP 桥带守护循环，源短断可自愈，但会话被销毁后仍需重跑一次 `flex_srs.sh`（重跑有健康检查，不会打断正常推流）。
+4. `whip_push` 的 `HTTP 0` 根因是旧 publish 会话未回收（SRS 约 37s），v4 用"等会话释放再推"绕开，未解决 SRS 侧回收慢的问题。
 
 **建议后续**
 
-1. **掉线自愈**：板上加守护脚本（每分钟检查 `PUSH_OK`/`recv_bytes` 增长，异常自动重启）。
-2. **NACK 重传**：给 webrtcbin 的 rtpbin 配置 NACK/RTX，提升公网 UDP 抗丢包能力，可把码率上限推到 4Mbps。
-3. **720p 真降分辨率**：PC 侧用 ffmpeg 拉板子 RTSP 转码 720p@15fps 再推 WHIP（需在 PC 装带 libx264 的 ffmpeg）。
-4. **开机自启**：flex_vision 起来后自动执行 `flex_srs.sh`，纳入 `/etc/init.d` 或 busybox init 脚本。
+1. **掉线自愈**：`flex_srs.sh` 已是幂等的（正常推流时 8s 内返回 `ALREADY_PUSHING`，不打断），可直接用 cron 每分钟巡检：`* * * * * /usr/local/bin/flex_srs.sh live1 >> /tmp/srs_cron.log 2>&1`。
+2. **开机自启**：在 `/etc/init.d/` 加一个 `S99flex`，内容依次是前置寄存器 → `insmod ax_vsync_ctrl.ko` → `flex_start.sh` → `flex_srs.sh live1`。
+3. **NACK 重传**：给 webrtcbin 的 rtpbin 配置 NACK/RTX，提升公网 UDP 抗丢包能力，可把码率上限推到 4Mbps。
+4. **720p 真降分辨率**：PC 侧用 ffmpeg 拉板子 RTSP 转码 720p@15fps 再推 WHIP（需在 PC 装带 libx264 的 ffmpeg）。
 5. **鉴权**：当前 SRS 无推流鉴权，公网任何人可向 `live` 应用推流，建议加 `http_hooks` 或 token 校验。

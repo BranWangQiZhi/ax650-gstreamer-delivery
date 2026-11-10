@@ -195,36 +195,22 @@ select()/poll fd → AX_VENC_GetStream(chn, 100ms) → 拿到 AX_VENC_STREAM_T
 `conf/whip.conf`），端口：1985 HTTP-API(WHIP/WHEP)、8000 TCP+UDP WebRTC、
 8080 HTTP-FLV、1935 RTMP。
 
-**生产推荐：RTMP(TCP) 推流** —— 板上 `/usr/local/bin/flex_rtmp.sh`：
-
-```bash
-flex_rtmp.sh [流名]      # 默认 live1, 日志 /tmp/rtmp_push.log
-```
-
-链路：`flex_vision rtsp://127.0.0.1:8554/ch1 → ffmpeg -c copy -f flv
-rtmp://121.40.107.62:1935/live/live1`。SRS 配置了 `rtmp_to_rtc on`，
-推入后自动转 WebRTC 播放（日志 `RTC bridge from RTMP`）。
-
-**为什么不用 WHIP 直推公网**：WHIP 走 UDP，2592×1944 高码率(~8Mbps)在公网
-必然丢包，IDR 帧（数百个 RTP 分片）被打碎后 SRS 的 RTC→RTMP 桥永远组不出
-完整关键帧（日志反复 `to rtmp bridge request key frame` + `set ts=` 但 FLV
-消费者 active=0），只有 WHEP 直播勉强可用。TCP(RTMP) 无丢包，全协议输出正常。
-若在**局域网**推 WHIP（如推 PC mediamtx），丢包率≈0，则无此问题。
+**WHIP 直推**：板上 `/usr/local/bin/flex_srs.sh`
+→ `http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream=live1`。
 
 **WHIP 直推公网的码率红线（重要实测结论）**：WHIP 走 UDP，公网丢包对大 IDR
 帧致命。8Mbps CBR 下一个 IDR 有数百个 RTP 分片，被打碎后 SRS 的 RTC→RTMP 桥
 永远组不出完整关键帧（FLV/RTMP 输出 0 字节）。把 flex_vision `[Encode]`
 `u32Bitrate` 从 8192 降到 **2048 Kbps**（重启 flex_vision 生效）后，
 IDR 体积缩小约 4 倍，WHIP 直推阿里云完全打通（8s FLV 拉 1.9MB≈2Mbps，
-抽帧验证无花屏）。**公网 WHIP 直推的可用码率上限约 2~3Mbps**；
-更高码率请用 RTMP(TCP) 方案。局域网推 WHIP（如推 PC mediamtx）丢包≈0，
+抽帧验证无花屏）。**公网 WHIP 直推的可用码率上限约 2~3Mbps**。
+局域网推 WHIP（如推 PC mediamtx）丢包≈0，
 8Mbps 也无此问题。板上无法输出低分辨率：flex_vision 的 sensor 配置是
 传感器原生 2592×1944，VENC 直接编码 ISP 输出，ini 无 crop/scale 项；
 axenc 硬编需 axmm 设备 ctx（与 flex 冲突），板上也没有 /dev/video*。
 
 **WHIP 方式**：板上 `/usr/local/bin/flex_srs.sh`
 → `http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream=live1`。
-另有 `flex_srs_pc.sh` 走 PC 本地 SRS 中转（192.168.137.1:1985，需中转服务运行）。
 
 **关键坑（WHIP+SRS）**：SRS 的 SDP 协商要求 offer 的 video m-line 带 `a=ssrc:`
 行（浏览器会带，webrtcbin 不带），否则 SRS 返回**没有 m-line 的残缺 answer**，

@@ -7,6 +7,11 @@ gstreamer_module/stage/
 gstreamer_module/build/
 gstreamer_module/tarballs/
 
+# build.sh 每次运行自动生成的中间文件（交叉编译配置文件）
+gstreamer_module/aarch64-cross.txt
+gstreamer_module/pkgcfg.sh
+gstreamer_module/src/
+
 # build.sh 交叉编译输出（apps/ 下为源码，产物在模块根目录）
 gstreamer_module/whip_push
 gstreamer_module/whip_push.exe
@@ -52,6 +57,9 @@ venv/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# AI 助手工作区数据（记忆/配置，不入库）
+.workbuddy/
 
 # ============================================================
 # 本地凭据（如有）——禁止提交

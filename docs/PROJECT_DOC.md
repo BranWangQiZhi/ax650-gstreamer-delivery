@@ -56,18 +56,18 @@
 
 | 项 | 值 |
 |---|---|
-| IP / 账号 | `192.168.137.77` / `root` / `123456` |
+| IP  | `192.168.137.77` |
 | 系统 | AX650 (aarch64)，glibc **2.30** |
 | 摄像头 | OG05B10 5MP 鱼眼，原生 2592×1944 |
 | 采集服务 | flex_vision，启动脚本 `/opt/bin/flex_vision_run.sh`，配置 `/opt/etc/cfg_og05b10_5cam_2lan.ini` |
-| RTSP 端口 | **8554**（不是 554），通道 `ch0 ch1 ch3 ch4`（ch2 异常，不使用） |
+| RTSP 端口 | **8554**（不是 554），通道 `ch0 ch2  ch1 ch3 ch4` |
 | GStreamer | 1.22.12，装在 `/usr/local`，环境脚本 `/etc/profile.d/gstreamer.sh` |
 
 ### 2.2 阿里云服务器
 
 | 项 | 值 |
 |---|---|
-| IP / 账号 | `121.40.107.62` / `root` |
+| IP  | `121.40.107.62` |
 | 流媒体 | SRS 6.0.195，路径 `/usr/local/srs/srs-server-6.0-r3`，配置 `trunk/conf/whip.conf` |
 | 端口 | 1985(API/WHIP/WHEP)、8000(WebRTC 媒体)、8080(HTTP-FLV/播放页)、1935(RTMP) |
 | 安全组 | 需放行 TCP 1985/8080/1935 与 UDP 8000 |
@@ -84,9 +84,18 @@
 ## 3. 交付文件清单
 
 ```
-delivery/
+gstreamer_delivery/               ← 仓库根 = 交付包根
 ├── README.md                       ← 快速上手（先看这个）
-├── PROJECT_DOC.md                  ← 本文档（完整技术资料）
+│
+├── docs/                           全部技术文档
+│   ├── PROJECT_DOC.md              ← 本文档（完整技术资料）
+│   ├── GStreamer_WebRTC集成指南.md   SDK 交叉编译 + mediamtx 验证细节
+│   └── images/                     链路验证截图（01→05 按链路顺序）
+│       ├── 01_ch0_板端采集.jpg
+│       ├── 02_ch1_webrtc拉流.jpg
+│       ├── 03_mediamtx_回放.jpg
+│       ├── 04_relay链路_回放.jpg
+│       └── 05_画面质量验证.jpg       FLV 抽帧验证图（鱼眼画面清晰无花屏）
 │
 ├── board/                          开发板文件
 │   ├── gstreamer.sh                 → /etc/profile.d/gstreamer.sh   运行环境变量
@@ -103,23 +112,25 @@ delivery/
 │   ├── srs_restart.sh               → /usr/local/bin/                SRS 重启
 │   └── deploy_server.sh             PC 侧一键下发脚本
 │
-├── pc/                             运维/诊断工具（PC 侧）
+├── tools/                          运维/诊断工具（PC 侧）
 │   ├── srs_relay.py                 用户态 TCP+UDP 中转（ICS 失效应急）
 │   ├── stun_test.py                 STUN 连通性探测
 │   └── udp_echo_srv.py              多端口 UDP 回显（排查 UDP 可达性）
 │
-└── docs/
-    └── 验证截图_画面质量.jpg          FLV 抽帧验证图（鱼眼画面清晰无花屏）
+└── gstreamer_module/               GStreamer 交叉编译模块（源码 + 部署包，位置不可挪）
 ```
 
-### 3.1 SDK 侧源码（另有，不在本交付目录）
+### 3.1 交叉编译相关（`gstreamer_module/` 与 SDK third-party 双份）
+
+`gstreamer_module/` 是 SDK 内 `third-party/gstreamer` 的本地镜像，两者内容对应：
 
 | 位置 | 说明 |
 |---|---|
-| `AX650_SDK.../third-party/gstreamer/` | GStreamer 交叉编译模块（download.sh / build.sh / Makefile） |
-| `.../third-party/gstreamer/apps/whip_push.c` | WHIP 客户端源码（自研，含 SSRC 补丁） |
-| `AX650_SDK.../GStreamer_WebRTC集成指南.md` | SDK 集成与编译细节（**编译/移植看这份**） |
-| `AX650_SDK.../gstreamer_module/` | 本地镜像源码 + 部署包 `gstreamer-aarch64-deploy.tar.gz` |
+| `gstreamer_module/` | 本交付包内的编译模块镜像（download.sh / build.sh / Makefile + apps/） |
+| `gstreamer_module/apps/whip_push.c` | WHIP 客户端源码（自研，含 SSRC 补丁） |
+| `docs/GStreamer_WebRTC集成指南.md` | SDK 集成与编译细节（**编译/移植看这份**） |
+| `AX650_SDK.../third-party/gstreamer/` | SDK 内的正式位置（`build.sh` 依赖 `../../` 相对路径，故本地镜像不可挪动） |
+| `.../gstreamer-aarch64-deploy.tar.gz` | 板端部署包（build.sh 产物，已 gitignore，需自行编译生成） |
 
 ---
 
@@ -285,7 +296,7 @@ ffmpeg -v error -i /tmp/c.flv -frames:v 1 -y /tmp/f.jpg
 | `whip_push ... bad HTTP response / HTTP 0` | SRS 偶发断连 | 重跑脚本即可（已内置 8 次重试） |
 | 板上 `curl: not found` | 板子未装 curl | 用 `busybox wget -q -O -` |
 | 浏览器 WebRTC 黑屏，FLV 正常 | UDP 8000 路径问题或 WHEP 未协商 | 用 `webrtc_live.html` 看诊断面板定位；临时用 FLV 页 |
-| 板上流量出不去（能 ping 网关） | PC 的 ICS NAT 转发卡死 | 管理员重启 `SharedAccess` 服务，或用 `pc/srs_relay.py` 用户态中转 |
+| 板上流量出不去（能 ping 网关） | PC 的 ICS NAT 转发卡死 | 管理员重启 `SharedAccess` 服务，或用 `tools/srs_relay.py` 用户态中转 |
 | RTSP 拉流 0 buffer 死锁 | `rtspsrc` 与 flex RTP 序号不兼容 | 必须走 ffmpeg RTP 桥 |
 | 板上 `LD_PRELOAD` 报找不到 glibc 符号 | 未加载兼容层（非交互 SSH 不读 profile） | `. /etc/profile.d/gstreamer.sh` |
 

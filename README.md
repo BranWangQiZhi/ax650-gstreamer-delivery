@@ -20,6 +20,31 @@ flex_vision ch1 (2592×1944 @ 2Mbps) → ffmpeg RTP 桥 → whip_push (WHIP/UDP)
 
 ---
 
+## 从 GitHub 获取（给外部同事 / 新板子）
+
+仓库：`https://github.com/BranWangQiZhi/ax650-gstreamer-delivery`
+
+**板子上一条命令搞定**（需要能出外网，root 执行）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BranWangQiZhi/ax650-gstreamer-delivery/main/board/gst_install.sh | sh
+```
+
+脚本自动完成：读最新 Release → 下载约 16MB 包 → SHA256 校验 → 解压到 `/usr/local`
+→ 写 `/etc/profile.d/gstreamer.sh` → 自检 `webrtcbin/x264enc/rtph264pay/rtspsrc`。
+
+GitHub 慢或被墙时套镜像：
+
+```bash
+GST_MIRROR=https://ghproxy.net/ curl -fsSL https://raw.githubusercontent.com/BranWangQiZhi/ax650-gstreamer-delivery/main/board/gst_install.sh | sh
+```
+
+其他用法：`sh install.sh -n`（只体检）、`-v <tag>`（指定版本）、`-f <本地包>`（离线）。
+
+**维护者发布**：`cd server && sh publish_github.sh`（建仓库 + 推代码 + 发 Release，需 `~/.gh_token`）。
+
+---
+
 ## 5 分钟上手
 
 **开发板（192.168.137.77）**
@@ -57,7 +82,7 @@ gstreamer_delivery/
 | 目录 | 内容 | 怎么用 |
 |---|---|---|
 | `board/` | 板上全部脚本 + 一键下发 | `cd board && sh deploy_board.sh` |
-| `server/` | 播放页 + SRS 重启 + 一键下发 | `cd server && sh deploy_server.sh` |
+| `server/` | 播放页 + SRS 重启 + 一键下发 + 发布工具 | `cd server && sh deploy_server.sh` |
 | `tools/` | 应急诊断工具（中转/UDP 探测） | 见下方「应急方案」 |
 | `docs/` | 交付文档 + 集成指南 | 按需查阅 |
 | `docs/images/` | 验证截图（按链路顺序 01→05 编号） | 画面质量佐证 |
@@ -73,6 +98,7 @@ gstreamer_delivery/
 | `flex_srs_pc.sh` | `/usr/local/bin/` | 备选：经 PC 本地 SRS 中转（需 PC 中转服务在跑） |
 | `flex_whip.sh` | `/usr/local/bin/` | 局域网 mediamtx 调试链路 |
 | `whip_test.sh` | `/usr/local/bin/` | 彩条自测（排查是环境问题还是码流问题） |
+| `gst_install.sh` | 不部署，在线下载执行 | ★ 外部同事一条命令装 GStreamer 运行时 |
 | `deploy_board.sh` | PC 上执行 | 一键下发全部脚本 + chmod |
 
 ### server/ 文件对照
@@ -83,6 +109,9 @@ gstreamer_delivery/
 | `webrtc_live.html` | `players/` | WHEP 播放页，顶栏显示 信令/ICE/连接/分辨率/丢包 |
 | `srs_restart.sh` | `/usr/local/bin/` | 重启 SRS（改配置后用） |
 | `deploy_server.sh` | PC 上执行 | 一键下发播放页并校验 HTTP |
+| `publish_github.sh` | PC 上执行 | ★ 发布到 GitHub：建仓库 + 推代码 + 发 Release |
+| `publish_gst.sh` | PC 上执行 | 发布到 SRS 静态目录（`/gst/`，适合内网或无外网场景） |
+| `gst_index.html` | `gst/index.html` | 静态发布页，配 `publish_gst.sh` 使用 |
 
 ---
 

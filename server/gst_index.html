@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AX650 GStreamer 运行时 · 一键安装</title>
+<style>
+  :root {
+    --bg: #FBFAF8;
+    --card: #FFFFFF;
+    --line: rgba(44,44,42,.12);
+    --text: #2C2C2A;
+    --muted: #5F5E5A;
+    --hint: #888780;
+    --blue: #185FA5;
+    --blue-bg: #E6F1FB;
+    --green: #3B6D11;
+    --green-bg: #EAF3DE;
+    --amber: #854F0B;
+    --amber-bg: #FAEEDA;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 20px 72px;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 14px; line-height: 1.65;
+  }
+  .wrap { max-width: 840px; margin: 0 auto; }
+  header { margin-bottom: 28px; }
+  h1 { font-size: 22px; font-weight: 500; margin: 0 0 8px; letter-spacing: -.2px; }
+  .lede { color: var(--muted); margin: 0; }
+  .badges { margin-top: 14px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .badge {
+    font-size: 12px; padding: 3px 9px; border-radius: 999px;
+    background: var(--blue-bg); color: var(--blue);
+  }
+  .badge.ok { background: var(--green-bg); color: var(--green); }
+  .badge.warn { background: var(--amber-bg); color: var(--amber); }
+
+  section {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 22px 24px; margin-bottom: 18px;
+  }
+  h2 { font-size: 15px; font-weight: 500; margin: 0 0 14px; }
+  h2 .n {
+    display: inline-block; width: 20px; height: 20px; line-height: 20px;
+    text-align: center; border-radius: 6px; background: var(--blue-bg);
+    color: var(--blue); font-size: 12px; margin-right: 8px;
+  }
+  p { margin: 0 0 10px; color: var(--muted); }
+  p:last-child { margin-bottom: 0; }
+
+  .cmd { position: relative; margin: 12px 0 0; }
+  pre {
+    margin: 0; padding: 14px 52px 14px 16px;
+    background: #F1EFE8; border-radius: 8px; overflow-x: auto;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 13px; line-height: 1.6; color: #2C2C2A;
+  }
+  pre .cmt { color: var(--hint); }
+  .copy {
+    position: absolute; top: 8px; right: 8px;
+    border: 1px solid var(--line); background: #fff; color: var(--muted);
+    border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+    font-family: inherit;
+  }
+  .copy:hover { border-color: var(--blue); color: var(--blue); }
+  .copy.done { background: var(--green-bg); color: var(--green); border-color: var(--green); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; font-weight: 500; color: var(--hint); font-size: 12px;
+    padding: 0 0 8px; border-bottom: 1px solid var(--line);
+  }
+  td { padding: 10px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td.mono, .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+  td.right, th.right { text-align: right; }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .tag {
+    font-size: 11px; padding: 1px 6px; border-radius: 4px;
+    background: var(--green-bg); color: var(--green); margin-left: 6px;
+  }
+  .sha { color: var(--hint); font-size: 11.5px; word-break: break-all; }
+
+  ul.req { margin: 0; padding-left: 18px; color: var(--muted); }
+  ul.req li { margin-bottom: 4px; }
+  ul.req code, .inline {
+    font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
+    background: #F1EFE8; padding: 1px 5px; border-radius: 4px; color: var(--text);
+  }
+  .empty { color: var(--hint); padding: 16px 0; }
+  footer { color: var(--hint); font-size: 12px; text-align: center; margin-top: 26px; }
+  footer code { font-family: ui-monospace, Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>AX650 GStreamer 运行时</h1>
+    <p class="lede">预编译的 GStreamer 1.22.12 + WebRTC 推流组件，一条命令装到板子上，无需交叉编译工具链。</p>
+    <div class="badges">
+      <span class="badge">aarch64</span>
+      <span class="badge ok">glibc 2.30+ 兼容层内置</span>
+      <span class="badge">含 whip_push</span>
+      <span class="badge warn">约 16 MB</span>
+    </div>
+  </header>
+
+  <section>
+    <h2><span class="n">1</span>板端一键安装</h2>
+    <p>以 root 在开发板上执行。<code class="inline">install.sh</code> 会自动选最新版本、校验 SHA256、解压到 <code class="inline">/usr/local</code>、写好环境变量并自检。</p>
+    <div class="cmd">
+      <pre id="cmd1">curl -fsSL <span id="base1">…</span>/install.sh | sh</pre>
+      <button class="copy" data-src="cmd1">复制</button>
+    </div>
+    <p style="margin-top:12px">装完后当前 shell 立即生效：</p>
+    <div class="cmd">
+      <pre id="cmd2">. /etc/profile.d/gstreamer.sh
+gst-inspect-1.0 webrtcbin</pre>
+      <button class="copy" data-src="cmd2">复制</button>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">2</span>版本列表</h2>
+    <div id="versions"><p class="empty">正在读取版本列表…</p></div>
+  </section>
+
+  <section>
+    <h2><span class="n">3</span>安装前确认</h2>
+    <ul class="req">
+      <li>架构必须是 <code>aarch64</code>（<code>uname -m</code> 查看），x86 板子用不了</li>
+      <li>板子 glibc ≥ 2.30；低版本由 <code>libglibc230_compat.so</code> 兜底</li>
+      <li><code>/usr/local</code> 至少留 40 MB 空间</li>
+      <li>替换前先停推流：<code>killall whip_push</code>（脚本检测到会拒绝执行，可加 <code>--force</code>）</li>
+      <li>仅体检不安装：<code>sh install.sh --check</code></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">4</span>其他用法</h2>
+    <div class="cmd">
+      <pre id="cmd3"><span class="cmt"># 指定版本</span>
+curl -fsSL <span id="base2">…</span>/install.sh | sh -s -- -v 1.22.12-r20261110
+
+<span class="cmt"># 内网镜像（改源地址）</span>
+GST_BASE=http://192.168.1.10/gst sh install.sh
+
+<span class="cmt"># 离线：先把包 scp 到板子，再本地安装</span>
+sh install.sh -f /tmp/gstreamer-aarch64-deploy.tar.gz</pre>
+      <button class="copy" data-src="cmd3">复制</button>
+    </div>
+    <p style="margin-top:12px">卸载：删除 <code class="inline">/usr/local/{bin/whip_push, lib/gstreamer-1.0, libexec/gstreamer-1.0}</code> 与 <code class="inline">/etc/profile.d/gstreamer.sh</code> 即可，不写系统其他位置。</p>
+  </section>
+
+  <footer>
+    发布源 <code id="base3">…</code> · 由 <code>server/publish_gst.sh</code> 生成
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  var base = location.href.replace(/[^/]*$/, '').replace(/\/$/, '');
+  ['base1', 'base2', 'base3'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = base;
+  });
+
+  function kb(n) {
+    if (!n) return '—';
+    return (n / 1024 / 1024).toFixed(1) + ' MB';
+  }
+  function day(s) {
+    return s ? String(s).slice(0, 10) : '—';
+  }
+
+  fetch('versions.json', { cache: 'no-store' })
+    .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(function (list) {
+      if (!Array.isArray(list) || !list.length) throw new Error('empty');
+      return Promise.all(list.map(function (v) {
+        return fetch(v + '/manifest.json', { cache: 'no-store' })
+          .then(function (r) { return r.ok ? r.json() : { version: v }; })
+          .catch(function () { return { version: v }; });
+      }));
+    })
+    .then(function (items) {
+      var box = document.getElementById('versions');
+      var rows = items.map(function (m, i) {
+        var v = m.version;
+        var latest = i === 0 ? '<span class="tag">最新</span>' : '';
+        return '<tr>' +
+          '<td class="mono">' + v + latest + '</td>' +
+          '<td>' + (m.gstreamer || '—') + '</td>' +
+          '<td>' + kb(m.size) + '</td>' +
+          '<td>' + day(m.built_at) + '</td>' +
+          '<td class="right"><a href="' + v + '/' + (m.file || 'gstreamer-aarch64-deploy.tar.gz') + '">下载</a>' +
+          (m.sha256 ? '<div class="sha">' + m.sha256.slice(0, 16) + '…</div>' : '') +
+          '</td></tr>';
+      }).join('');
+      box.innerHTML = '<table><thead><tr>' +
+        '<th>版本</th><th>GStreamer</th><th>大小</th><th>构建日期</th><th class="right">包</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table>';
+    })
+    .catch(function () {
+      document.getElementById('versions').innerHTML =
+        '<p class="empty">暂无版本信息。确认 <code>versions.json</code> 已上传，或直接用上面的安装命令。</p>';
+    });
+
+  document.querySelectorAll('.copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var pre = document.getElementById(btn.dataset.src);
+      if (!pre) return;
+      var text = pre.innerText;
+      var done = function () {
+        btn.textContent = '已复制';
+        btn.classList.add('done');
+        setTimeout(function () {
+          btn.textContent = '复制';
+          btn.classList.remove('done');
+        }, 1600);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, fallback);
+      } else { fallback(); }
+      function fallback() {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>

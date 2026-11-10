@@ -1,0 +1,43 @@
+# ============================================================
+# 行尾策略：本仓库交付物要跑在 AX650 (Linux) 板上，
+# 一律强制 LF，禁止 Windows 的 core.autocrlf=true 把 .sh 转成 CRLF
+# （CRLF 的 shebang 会导致 /bin/sh^M: bad interpreter）
+# ============================================================
+* text=auto eol=lf
+
+# --- 必须 LF：在板子/服务器上直接执行的脚本 ---
+*.sh    text eol=lf
+*.py    text eol=lf
+*.c     text eol=lf
+*.h     text eol=lf
+*.map   text eol=lf
+Makefile text eol=lf
+*.mk    text eol=lf
+
+# --- 配置/文本：LF ---
+*.conf  text eol=lf
+*.cfg   text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+*.js    text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+
+# --- 二进制：不做任何转换，也不做 diff ---
+*.so        binary
+*.a         binary
+*.o         binary
+*.gz        binary
+*.tar       binary
+*.xz        binary
+*.bz2       binary
+*.zip       binary
+*.jpg       binary
+*.jpeg      binary
+*.png       binary
+*.mp4       binary
+*.h264      binary
+*.ivf       binary
+*.pcap      binary
+whip_push   binary

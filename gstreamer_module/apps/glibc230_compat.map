@@ -1,0 +1,13 @@
+GLIBC_2.32 {
+  global:
+    pthread_sigmask;
+};
+
+GLIBC_2.33 {
+  global:
+    stat64;
+    lstat64;
+    fstat64;
+  local:
+    *;
+} GLIBC_2.32;

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<title>SRS Live - WebRTC (WHEP) Player</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<style>
+  html, body { margin:0; padding:0; height:100%; background:#0d1117; color:#e6edf3;
+               font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; }
+  #bar { padding:10px 14px; background:#161b22; border-bottom:1px solid #30363d;
+         display:flex; gap:14px; align-items:center; flex-wrap:wrap; font-size:13px; }
+  #bar b { color:#58a6ff; }
+  .pill { padding:2px 8px; border-radius:10px; background:#21262d; font-size:12px; }
+  .ok { color:#3fb950; } .warn { color:#d29922; } .err { color:#f85149; }
+  #wrap { position:relative; height:calc(100% - 46px); display:flex; align-items:center;
+          justify-content:center; background:#000; }
+  video { max-width:100%; max-height:100%; background:#000; }
+  #overlay { position:absolute; inset:0; display:flex; flex-direction:column; gap:14px;
+             align-items:center; justify-content:center; background:rgba(0,0,0,.78);
+             cursor:pointer; text-align:center; padding:20px; }
+  #overlay.hide { display:none; }
+  #overlay .big { font-size:17px; }
+  #overlay .sub { font-size:12px; color:#8b949e; max-width:560px; line-height:1.7; }
+  button { background:#238636; color:#fff; border:0; border-radius:6px; padding:10px 22px;
+           font-size:15px; cursor:pointer; }
+  button:hover { background:#2ea043; }
+  #log { position:absolute; left:8px; bottom:8px; right:8px; max-height:34%; overflow:auto;
+         font-family:ui-monospace,Consolas,monospace; font-size:11px; color:#8b949e;
+         background:rgba(0,0,0,.55); padding:6px 8px; border-radius:6px; display:none;
+         white-space:pre-wrap; }
+  #log.show { display:block; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <span>流：<b id="name">-</b></span>
+  <span class="pill">WebRTC / WHEP</span>
+  <span id="sig" class="pill">信令：待连接</span>
+  <span id="ice" class="pill">ICE：-</span>
+  <span id="pc" class="pill">连接：-</span>
+  <span id="stats" class="pill">-</span>
+  <span id="toggle" class="pill" style="cursor:pointer">日志</span>
+</div>
+<div id="wrap">
+  <video id="v" muted playsinline autoplay></video>
+  <div id="overlay">
+    <div class="big">点击开始播放（WebRTC）</div>
+    <div class="sub">延迟最低（200~500ms）。若一直转圈，点右下角"日志"看具体卡在哪一步。</div>
+    <button id="btn">开始播放</button>
+  </div>
+  <div id="log"></div>
+</div>
+<script>
+(function () {
+  var qs = new URLSearchParams(location.search);
+  var stream = qs.get('stream') || 'live1';
+  var apiPort = qs.get('api') || '1985';
+  var whepUrl = 'http://' + location.hostname + ':' + apiPort +
+                '/rtc/v1/whep/?app=live&stream=' + encodeURIComponent(stream);
+  var v = document.getElementById('v');
+  var overlay = document.getElementById('overlay');
+  var logEl = document.getElementById('log');
+  var sigEl = document.getElementById('sig'), iceEl = document.getElementById('ice');
+  var pcEl = document.getElementById('pc'), statsEl = document.getElementById('stats');
+  document.getElementById('name').textContent = stream;
+  document.title = 'WebRTC: ' + stream;
+
+  function log(msg) {
+    var t = new Date().toISOString().substr(11, 12);
+    logEl.textContent += '[' + t + '] ' + msg + '\n';
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function set(el, text, cls) {
+    el.textContent = text;
+    el.className = 'pill ' + (cls || '');
+  }
+  document.getElementById('toggle').addEventListener('click', function () {
+    logEl.classList.toggle('show');
+  });
+  log('页面加载，WHEP 地址: ' + whepUrl);
+
+  var pc, started = false;
+
+  function start() {
+    if (started) return;
+    started = true;
+    overlay.classList.add('hide');
+    set(sigEl, '信令：创建 offer...', 'warn');
+
+    pc = new RTCPeerConnection({ iceServers: [] });
+    // recvonly video transceiver (H264 preferred)
+    var tr = pc.addTransceiver('video', { direction: 'recvonly' });
+    var caps = RTCRtpReceiver.getCapabilities('video');
+    if (caps && caps.codecs) {
+      var h264 = caps.codecs.filter(function (c) { return /H264/i.test(c.mimeType); });
+      try {
+        if (h264.length) {
+          tr.setCodecPreferences(h264);
+          log('优先 H264，可用编码数=' + h264.length);
+        }
+      } catch (e) { log('setCodecPreferences 失败: ' + e.message); }
+    }
+
+    pc.onicecandidate = function (e) {
+      if (e.candidate) log('本地 candidate: ' + e.candidate.candidate);
+    };
+    pc.onicegatheringstatechange = function () {
+      log('iceGatheringState=' + pc.iceGatheringState);
+    };
+    pc.oniceconnectionstatechange = function () {
+      set(iceEl, 'ICE：' + pc.iceConnectionState,
+          pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed' ? 'ok' : 'warn');
+      log('iceConnectionState=' + pc.iceConnectionState);
+    };
+    pc.onconnectionstatechange = function () {
+      set(pcEl, '连接：' + pc.connectionState,
+          pc.connectionState === 'connected' ? 'ok' : (pc.connectionState === 'failed' ? 'err' : 'warn'));
+      log('connectionState=' + pc.connectionState);
+      if (pc.connectionState === 'failed') {
+        overlay.classList.remove('hide');
+        overlay.querySelector('.big').textContent = '连接失败（ICE 无法建立）';
+        overlay.querySelector('.sub').textContent = '点"日志"查看详情；常见原因：本机到服务器 UDP 被拦/端口不通';
+        started = false;
+      }
+    };
+    pc.ontrack = function (ev) {
+      log('收到 track: ' + ev.track.kind);
+      v.srcObject = new MediaStream([ev.track]);
+      v.play().then(function () { log('video.play() 成功'); })
+                .catch(function (e) { log('video.play() 失败: ' + e.message); });
+    };
+
+    pc.createOffer().then(function (offer) {
+      log('offer 创建完成，字节数=' + offer.sdp.length);
+      return pc.setLocalDescription(offer);
+    }).then(function () {
+      set(sigEl, '信令：POST WHEP...', 'warn');
+      return fetch(whepUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/sdp' },
+        body: pc.localDescription.sdp
+      });
+    }).then(function (res) {
+      log('WHEP 响应 HTTP ' + res.status);
+      if (!res.ok) {
+        set(sigEl, '信令：HTTP ' + res.status, 'err');
+        return res.text().then(function (t) { log('错误内容: ' + t); throw new Error('HTTP ' + res.status); });
+      }
+      set(sigEl, '信令：已应答', 'ok');
+      return res.text();
+    }).then(function (answer) {
+      log('answer 字节数=' + answer.length);
+      log(answer.split('\r\n').filter(function (l) {
+        return /candidate|ice-ufrag|setup|m=/.test(l);
+      }).join('\n'));
+      return pc.setRemoteDescription({ type: 'answer', sdp: answer });
+    }).then(function () {
+      log('setRemoteDescription 完成，等待 ICE...');
+    }).catch(function (e) {
+      set(sigEl, '信令失败', 'err');
+      log('异常: ' + e.message);
+      started = false;
+      overlay.classList.remove('hide');
+    });
+
+    setInterval(function () {
+      if (!pc) return;
+      pc.getStats().then(function (report) {
+        report.forEach(function (s) {
+          if (s.type === 'inbound-rtp' && s.kind === 'video') {
+            var kbps = s.bytesReceived ? Math.round(s.bytesReceived * 8 / 1000) : 0;
+            statsEl.textContent = (s.frameWidth || '?') + 'x' + (s.frameHeight || '?') +
+              ' · ' + (s.framesPerSecond || 0) + 'fps · ' + (s.packetsLost || 0) + ' 丢包';
+          }
+        });
+      }).catch(function () {});
+    }, 2000);
+  }
+
+  document.getElementById('btn').addEventListener('click', function (e) { e.stopPropagation(); start(); });
+  overlay.addEventListener('click', start);
+  window.addEventListener('error', function (e) { log('JS 错误: ' + e.message); });
+})();
+</script>
+</body>
+</html>

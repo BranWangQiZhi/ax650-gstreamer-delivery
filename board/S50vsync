@@ -1,0 +1,21 @@
+#!/bin/sh
+# ============================================================
+# S50vsync — PWM 多机同步前置（开机自动执行, 部署路径 /etc/init.d/S50vsync）
+# ============================================================
+# 背景: sync_mode=2(PWM) 时, 缺 ax_vsync_ctrl.ko 会导致
+#       media_flow_setup failed ret=0x80000004, 表现为 8554 无监听
+#       (详见 flex_start.sh 头注释; 本脚本让前置在开机阶段完成, 无需登录)
+# 注意: S50 数字前缀保证先于拉起 flex_vision 的 init 脚本执行;
+#       flex_start.sh 内保留了同样的幂等前置, 手工重跑仍自洽。
+
+# 1) 写寄存器(功能选择 + 使能)
+ax_lookat 0x425023c -s 0x10003 2>/dev/null
+ax_lookat 0x4250248 -s 0x10003 2>/dev/null
+
+# 2) 装内核模块(modprobe 会自动带依赖; 失败不阻断开机)
+if ! lsmod | grep -q ax_vsync_ctrl; then
+  modprobe ax_vsync_ctrl 2>/dev/null || insmod /soc/ko/ax_vsync_ctrl.ko
+  lsmod | grep -q ax_vsync_ctrl && echo "ax_vsync_ctrl.ko loaded"
+fi
+
+exit 0

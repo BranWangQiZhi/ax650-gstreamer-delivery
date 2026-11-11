@@ -224,6 +224,15 @@ for s in bin/flex_start.sh bin/flex_srs.sh bin/rtp_bridge.sh; do
     say "警告      : 包内未找到 $s（旧版包只有运行时，业务脚本需另行下发）"
   fi
 done
+INIT_OK=1
+for f in etc/init.d/S50vsync etc/init.d/S98imu; do
+  if tar -tzf "$TAR" | grep -qx "$f"; then
+    say "开机脚本  : $f OK"
+  else
+    INIT_OK=0
+    say "警告      : 包内未找到 $f（旧版包，对应开机前置需手工执行）"
+  fi
+done
 say "结构      : OK"
 
 step "解压到 $DEST"
@@ -234,6 +243,17 @@ tar -xzf "$TAR" -C "$DEST" || die "解压失败"
 for s in "$DEST"/bin/*.sh; do
   [ -f "$s" ] && chmod 755 "$s"
 done
+# 开机 init 脚本: 包内是暂存位置($DEST/etc/init.d), 转装到系统 /etc/init.d/
+if [ -f "$DEST/etc/init.d/S50vsync" ] || [ -f "$DEST/etc/init.d/S98imu" ]; then
+  mkdir -p /etc/init.d
+  for f in S50vsync S98imu; do
+    if [ -f "$DEST/etc/init.d/$f" ]; then
+      cp "$DEST/etc/init.d/$f" "/etc/init.d/$f"
+      chmod 755 "/etc/init.d/$f"
+    fi
+  done
+  rm -rf "$DEST/etc"
+fi
 GOT_DIRS=$(tar -tzf "$TAR" | awk -F/ 'NF>1{print $1}' | sort -u | tr '\n' ',')
 say "完成      : $DEST/{${GOT_DIRS%,}}"
 
@@ -290,6 +310,13 @@ printf '\n当前 shell 立即生效:  . %s\n' "$PROFILE"
 say "验证         :  gst-inspect-1.0 webrtcbin"
 if [ "$SCRIPTS_OK" = "1" ]; then
   say "业务脚本     :  flex_start.sh / flex_srs.sh / rtp_bridge.sh（已装 $DEST/bin）"
+fi
+if [ "$INIT_OK" = "1" ]; then
+  say "开机前置     :  /etc/init.d/S50vsync（PWM 寄存器 + ax_vsync_ctrl.ko）"
+  say "                /etc/init.d/S98imu（ICM-45686 IMU 驱动装载）"
+  say "                重启自动生效, 无需登录"
+fi
+if [ "$SCRIPTS_OK" = "1" ]; then
   say "推流自测     :  flex_srs.sh test"
   say "正式推流     :  flex_start.sh && flex_srs.sh"
 else
@@ -297,7 +324,8 @@ else
 fi
 say "卸载         :  rm -rf $DEST/bin/whip_push $DEST/lib/gstreamer-1.0 \\"
 say "                 $DEST/libexec/gstreamer-1.0 $PROFILE \\"
-say "                 $DEST/bin/flex_*.sh $DEST/bin/rtp_bridge.sh"
+say "                 $DEST/bin/flex_*.sh $DEST/bin/rtp_bridge.sh \\"
+say "                 /etc/init.d/S50vsync /etc/init.d/S98imu"
 
 if [ "$SCANNER_OK" = "0" ]; then
   printf '\n[注意] 缺 gst-plugin-scanner，插件注册改走进程内扫描（能用，但首次启动更慢）。\n' >&2

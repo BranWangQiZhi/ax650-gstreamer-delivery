@@ -350,12 +350,16 @@ install_rootfs() {
     for s in flex_start.sh flex_srs.sh rtp_bridge.sh; do
       cp "$BOARD_DIR/$s" "$STAGE/bin/$s"
     done
-    echo "Board scripts packed into stage/bin: flex_start.sh flex_srs.sh rtp_bridge.sh"
+    # 开机 init 脚本: 包装进 etc/init.d/, 由 gst_install.sh 转装到 /etc/init.d/
+    $MKDIR "$STAGE/etc/init.d"
+    cp "$BOARD_DIR/S50vsync" "$STAGE/etc/init.d/S50vsync"
+    cp "$BOARD_DIR/S98imu" "$STAGE/etc/init.d/S98imu"
+    echo "Board scripts packed: flex_start.sh flex_srs.sh rtp_bridge.sh -> stage/bin; S50vsync S98imu -> stage/etc/init.d"
   else
     echo "WARN: $BOARD_DIR 不存在, 部署包不含业务脚本(仅运行时)"
   fi
   # deploy tarball for the board
-  tar -czf "$CUR/gstreamer-aarch64-deploy.tar.gz" -C "$STAGE" bin lib libexec
+  tar -czf "$CUR/gstreamer-aarch64-deploy.tar.gz" -C "$STAGE" bin lib libexec etc
   echo "Install gstreamer to SDK rootfs success: $ROOTFS"
   echo "Deploy tarball: $CUR/gstreamer-aarch64-deploy.tar.gz"
 }

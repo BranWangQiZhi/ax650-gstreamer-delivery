@@ -91,13 +91,15 @@ gstreamer_delivery/
 | `tools/` | 应急诊断工具（PC 侧） | 按需使用 |
 | `docs/` | 交付文档 + 集成指南 | 按需查阅 |
 | `docs/images/` | 验证截图（按链路顺序 01→05 编号） | 画面质量佐证 |
-| `gstreamer_module/` | 交叉编译源码与脚本 | `make` / `sh build.sh`，见集成指南 |
+| `gstreamer_module/` | 交叉编译源码与脚本 | 见 [`gstreamer_module/README.md`](gstreamer_module/README.md)，细节见集成指南 |
 
 ### board/ 脚本对照
 
 | 文件 | 部署到 | 作用 |
 |---|---|---|
 | `flex_start.sh` | `/usr/local/bin/` | ★ 启动相机服务：PWM 同步前置 + insmod + 等 8554 就绪（重启后必跑） |
+| `S50vsync` | `/etc/init.d/` | ★ 开机自动做 PWM 寄存器写入 + 装载 ax_vsync_ctrl.ko（无需登录，先于相机服务） |
+| `S98imu` | `/etc/init.d/` | ★ 开机装载 ICM-45686 IMU 驱动（insmod + 探测 /dev/ax_imu + DRDY 中断检查，支持 start/stop/restart） |
 | `flex_srs.sh` | `/usr/local/bin/` | ★ 生产：WHIP 直推阿里云，内置源检查 / 会话回收等待 / 桥守护 / 假连接检测；`flex_srs.sh test` 彩条自测（排查是环境问题还是码流问题） |
 | `rtp_bridge.sh` | `/usr/local/bin/` | ★ RTP 桥守护：ffmpeg RTSP→UDP:5004，断开自动重连（不要直接裸跑 ffmpeg） |
 | `gst_install.sh` | 不部署，在线下载执行 | ★ 板端一条命令装齐：GStreamer 运行时 + 业务脚本（自动生成 `/etc/profile.d/gstreamer.sh`） |

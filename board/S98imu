@@ -1,0 +1,56 @@
+#!/bin/sh
+# ICM-45686 driver load at power-on. rcS runs the S?? loop after
+# auto_load_all_drv.sh, so ax_sys - the only symbol this module links against -
+# is already loaded.
+
+KO=/soc/ko/ax_icm45686.ko
+DEV=/dev/ax_imu
+LOG=/opt/data/AXSyslog/imu.log
+
+say() {
+	echo "imu: $*"
+	echo "imu: $*" >>"$LOG" 2>/dev/null
+}
+
+case "$1" in
+start | "")
+	if grep -q '^ax_icm45686 ' /proc/modules; then
+		[ -e "$DEV" ] || say "already loaded but $DEV is missing"
+		exit 0
+	fi
+	[ -f "$KO" ] || { say "missing $KO"; exit 1; }
+	insmod "$KO" || { say "insmod failed"; exit 1; }
+
+	# insmod returns 0 even when probe failed, so judge by the device node.
+	i=0
+	while [ ! -e "$DEV" ] && [ $i -lt 30 ]; do
+		sleep 0.1
+		i=$((i + 1))
+	done
+	if [ ! -e "$DEV" ]; then
+		say "probe failed"
+		dmesg | tail -5 | tee -a "$LOG"
+		exit 1
+	fi
+
+	# Without the DRDY irq the ring stays empty while $DEV still looks fine.
+	if grep -q icm45686-int1 /proc/interrupts; then
+		say "loaded, $(head -1 /sys/bus/spi/devices/spi0.0/imu_reg)"
+	else
+		say "WARNING: no icm45686-int1 irq, DRDY not wired"
+	fi
+	;;
+stop)
+	rmmod ax_icm45686 2>/dev/null
+	;;
+restart)
+	$0 stop
+	sleep 0.2
+	$0 start
+	;;
+*)
+	echo "Usage: $0 {start|stop|restart}"
+	exit 2
+	;;
+esac
+exit 0

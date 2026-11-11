@@ -95,6 +95,8 @@ gstreamer_delivery/               ← 仓库根 = 交付包根
 │       └── 05_画面质量验证.jpg       FLV 抽帧验证图（鱼眼画面清晰无花屏）
 │
 ├── board/                          开发板文件
+│   ├── S50vsync                     → /etc/init.d/S50vsync          ★ 开机自动 PWM 前置 + 装载 ax_vsync_ctrl.ko
+│   ├── S98imu                       → /etc/init.d/S98imu            ★ 开机装载 ICM-45686 IMU 驱动
 │   ├── flex_srs.sh                  → /usr/local/bin/                ★ 生产：WHIP 直推（test 参数 = 彩条自测）
 │   └── gst_install.sh               板端一键安装（运行时+业务脚本，在线下载执行）
 │
@@ -118,6 +120,7 @@ gstreamer_delivery/               ← 仓库根 = 交付包根
 
 | 位置 | 说明 |
 |---|---|
+| `gstreamer_module/README.md` | 模块文档入口（目录结构 / 快速开始 / 部署包内容 / 双份镜像说明） |
 | `gstreamer_module/` | 本交付包内的编译模块镜像（download.sh / build.sh / Makefile + apps/） |
 | `gstreamer_module/apps/whip_push.c` | WHIP 客户端源码（自研，含 SSRC 补丁） |
 | `docs/GStreamer_WebRTC集成指南.md` | SDK 集成与编译细节（**编译/移植看这份**） |

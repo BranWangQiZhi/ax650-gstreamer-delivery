@@ -42,7 +42,7 @@ bash tools/board_deploy.sh -r live1               # 装完直接推正式流
 前提：PC 能 ssh 到板子，建议先配免密 `ssh-copy-id root@<板IP>`。
 脚本串联：连通性检查 → 打包 → scp 到 `/tmp/delivery` → 板端离线安装 → 自检。
 
-### 方式 B：板子自己能上外网（需先发布 Release）
+### 方式 B：板子自己能上外网
 
 板上 root 执行：
 
@@ -50,13 +50,13 @@ bash tools/board_deploy.sh -r live1               # 装完直接推正式流
 curl -fsSL https://raw.githubusercontent.com/BranWangQiZhi/ax650-gstreamer-delivery/main/board/gst_install.sh | sh
 ```
 
-> ⚠️ 这个方式读的是 **GitHub Release**。仓库目前**还没有发布任何 Release**，
-> 直接跑会停在"下载安装包"并 404。发布 Release 后才可用。
-> 被墙时套镜像：`GST_MIRROR=https://ghproxy.net/ ...`（镜像不通就退回方式 A）。
->
-> 发布方法：`sha256sum gstreamer_module/gstreamer-aarch64-deploy.tar.gz > sha256`，
-> 然后在 Releases → Draft a new release，tag 例如 `1.22.12-r20261111`，
-> 上传 `gstreamer-aarch64-deploy.tar.gz` 与 `sha256` 两个文件并 Publish。
+Release 1.0.0 已包含 `gstreamer-aarch64-deploy.tar.gz` 与 `sha256` 资产（下载链接已实测 200）。
+被墙时套镜像：`GST_MIRROR=https://ghproxy.net/ ...`。
+
+> ⚠️ 实测（2026-11-11，AX650 / glibc 2.30）：板上只有 busybox `wget` 且没有 `curl`，
+> busybox 的 TLS 握手直接被拒（alert 40，疑似不带 SNI），
+> raw.githubusercontent.com / github.com / ghproxy.net 在板上**全部不通**。
+> 所以本板走不了在线安装，**请用方式 A**。方式 B 只适合 TLS 栈完整的设备。
 
 ### 方式 C：手工在板上装
 

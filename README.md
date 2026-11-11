@@ -173,6 +173,15 @@ flex_srs.sh live1
    `webrtcbin` 永远无法 `connection established`。
 2. **部署包缺 `gst-plugin-scanner`**。新包已包含 `libexec/gstreamer-1.0/`，
    包顶层为 `bin / lib / libexec`。
+3. **真实相机流全链路已验证通过（14:23–14:27）**。`board_deploy.sh` 下发安装后自检
+   `webrtcbin / x264enc / rtph264pay / rtspsrc` 全 OK、`scanner OK`；`flex_start.sh` 起相机，
+   `flex_srs.sh live1` 首轮即 `PUSH_OK try=0 recv_delta_MB=2`。SRS `publish.active=true`、
+   `recv_30s≈2085 kbps`、`video=H264 Baseline 2592x1944`；服务器端 HTTP-FLV 6 秒拉到
+   1.5MB，ffprobe 出 h264 / 2592x1944，WHEP 与 FLV 播放页均返回 200。
+   日志出现 `[whip] offer ssrc=…`、`[whip] fixed rtph264pay ssrc=1111111`、
+   `connection established`，131 字节残缺 answer 问题消失。
 
 > ⚠️ 待办：GitHub Release 1.0.0 的 `gstreamer-aarch64-deploy.tar.gz` 与 `sha256` 仍是旧资产，
 > 需重新上传，否则从 Release 下载会拿到旧二进制；仓库内已入库的包是最新修复版。
+> 另：板子 14:00 前后曾多次自行重启（dmesg 无 panic/OOM，疑看门狗或供电），本轮 24 分钟内
+> 未再复现，长期稳定性仍需从串口/电源侧确认。

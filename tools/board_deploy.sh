@@ -45,7 +45,8 @@ done
 # ---------------- 1. 定位仓库 ----------------
 step "定位仓库"
 CLEANUP=
-if [ -f board/gst_install.sh ] && [ -f gstreamer_module/gstreamer-aarch64-deploy.tar.gz ]; then
+if [ -f board/gst_install.sh ]; then
+  # 只看脚本是否在仓库目录，部署包缺失由后面从 Release 自动补
   REPO=$(pwd)
   say "使用当前目录: $REPO"
 else
@@ -62,8 +63,33 @@ fi
 [ -n "$CLEANUP" ] && trap 'rm -rf "$CLEANUP"' EXIT INT TERM
 
 PKG=$REPO/gstreamer_module/gstreamer-aarch64-deploy.tar.gz
-[ -f "$PKG" ] || die "缺少部署包: $PKG"
-say "部署包    : $PKG ($(( $(du -k "$PKG" | awk '{print $1}') / 1024 ))MB)"
+if [ ! -f "$PKG" ]; then
+  # 仓库 .gitignore 排除了二进制部署包（编译机本地才有），clone/zip 下载后需从 Release 补
+  ASSET_URL="${GST_MIRROR:-}https://github.com/BranWangQiZhi/ax650-gstreamer-delivery/releases/latest/download/gstreamer-aarch64-deploy.tar.gz"
+  say "仓库内无部署包（.gitignore 不入库），从 Release 下载..."
+  say "地址      : $ASSET_URL"
+  mkdir -p "$(dirname "$PKG")"
+  curl -fL --connect-timeout 10 --retry 3 -o "$PKG" "$ASSET_URL" \
+    || die "部署包下载失败: $ASSET_URL
+  排查: PC 能访问 GitHub 吗？被墙时加镜像重跑: GST_MIRROR=https://ghproxy.net/ bash tools/board_deploy.sh"
+  # 校验: 连接中断会留下截断的包, 必须对照 Release 的 sha256
+  SHA_URL="${GST_MIRROR:-}https://github.com/BranWangQiZhi/ax650-gstreamer-delivery/releases/latest/download/sha256"
+  SHA_TMP=/tmp/ax650-deploy.sha256
+  if curl -fsL --connect-timeout 10 --retry 3 -o "$SHA_TMP" "$SHA_URL"; then
+    WANT=$(awk '{print $1}' "$SHA_TMP")
+    GOT=$(sha256sum "$PKG" | awk '{print $1}')
+    if [ "$GOT" != "$WANT" ]; then
+      rm -f "$PKG"
+      die "部署包校验失败（下载不完整或被替换）期望 $WANT 实际 $GOT，已删除坏包，请重跑"
+    fi
+    say "校验      : $GOT"
+  else
+    say "警告      : 取不到 Release sha256，跳过校验"
+  fi
+fi
+SZ_KB=$(du -k "$PKG" | awk '{print $1}')
+[ "$SZ_KB" -gt 1024 ] || die "部署包过小（${SZ_KB}KB），下载可能拿到的是错误页"
+say "部署包    : $PKG ($(( SZ_KB / 1024 ))MB)"
 
 # ---------------- 2. 连通性 ----------------
 step "检查板子连通性"

@@ -1,7 +1,8 @@
 # ============================================================
 # 构建产物 —— 可由 gstreamer_module/build.sh 重新生成，不入库
 # ============================================================
-gstreamer_module/gstreamer-aarch64-deploy.tar.gz
+# 注: gstreamer-aarch64-deploy.tar.gz 已改为入库（外部同事 clone/zip 下载即带包），
+#     每次重编译后需重新 commit
 gstreamer_module/out/
 gstreamer_module/stage/
 gstreamer_module/build/

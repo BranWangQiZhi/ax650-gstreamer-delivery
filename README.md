@@ -24,22 +24,51 @@ flex_vision ch1 (2592×1944 @ 2Mbps) → ffmpeg RTP 桥 → whip_push (WHIP/UDP)
 
 仓库：`https://github.com/BranWangQiZhi/ax650-gstreamer-delivery`
 
-**板子上一条命令搞定**（需要能出外网，root 执行）：
+访问 GitHub 的能力通常在 **PC 上**，不在板子上（板子经 PC 的 ICS 共享上网，
+`raw.githubusercontent.com` 基本超时）。所以推荐顺序是：**PC 拉仓库 → 下发到板 → 板端本地装**。
+
+### 方式 A：PC 一条命令（推荐，已实测）
+
+```bash
+git clone https://github.com/BranWangQiZhi/ax650-gstreamer-delivery.git
+cd ax650-gstreamer-delivery
+
+bash tools/board_deploy.sh                        # 默认板 192.168.137.77：下发 + 安装 + 自检
+bash tools/board_deploy.sh -b root@192.168.1.50   # 换一块板
+bash tools/board_deploy.sh -r test                # 装完直接彩条自测推流
+bash tools/board_deploy.sh -r live1               # 装完直接推正式流
+```
+
+前提：PC 能 ssh 到板子，建议先配免密 `ssh-copy-id root@<板IP>`。
+脚本串联：连通性检查 → 打包 → scp 到 `/tmp/delivery` → 板端离线安装 → 自检。
+
+### 方式 B：板子自己能上外网（需先发布 Release）
+
+板上 root 执行：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/BranWangQiZhi/ax650-gstreamer-delivery/main/board/gst_install.sh | sh
 ```
 
-脚本自动完成：读最新 Release → 下载约 16MB 包 → SHA256 校验 → 解压到 `/usr/local`
-→ 写 `/etc/profile.d/gstreamer.sh` → 自检 `webrtcbin/x264enc/rtph264pay/rtspsrc`。
+> ⚠️ 这个方式读的是 **GitHub Release**。仓库目前**还没有发布任何 Release**，
+> 直接跑会停在"下载安装包"并 404。发布 Release 后才可用。
+> 被墙时套镜像：`GST_MIRROR=https://ghproxy.net/ ...`（镜像不通就退回方式 A）。
+>
+> 发布方法：`sha256sum gstreamer_module/gstreamer-aarch64-deploy.tar.gz > sha256`，
+> 然后在 Releases → Draft a new release，tag 例如 `1.22.12-r20261111`，
+> 上传 `gstreamer-aarch64-deploy.tar.gz` 与 `sha256` 两个文件并 Publish。
 
-GitHub 慢或被墙时套镜像：
+### 方式 C：手工在板上装
 
 ```bash
-GST_MIRROR=https://ghproxy.net/ curl -fsSL https://raw.githubusercontent.com/BranWangQiZhi/ax650-gstreamer-delivery/main/board/gst_install.sh | sh
+sh board/gst_install.sh -l /tmp/delivery                        # 指向下发到板上的仓库目录
+sh board/gst_install.sh -l /tmp/gstreamer-aarch64-deploy.tar.gz  # 只有部署包
+GST_MIRROR=https://ghproxy.net/ sh board/gst_install.sh          # 在线装（同方式 B）
+sh board/gst_install.sh -n                                      # 只体检，不动文件
 ```
 
-其他用法：`sh install.sh -n`（只体检）、`-v <tag>`（指定版本）。
+脚本做的事：解压到 `/usr/local` → 用仓库 `board/` 补齐业务脚本与开机脚本
+→ 写 `/etc/profile.d/gstreamer.sh` → 自检 `webrtcbin/x264enc/rtph264pay/rtspsrc`。
 
 ---
 
@@ -88,7 +117,7 @@ gstreamer_delivery/
 |---|---|---|
 | `board/` | 板上全部脚本 + 板端一键安装 | `curl .../gst_install.sh \| sh`（见下文） |
 | `server/` | 播放页 + SRS 重启 + 一键下发 + 发布工具 | `cd server && sh deploy_server.sh` |
-| `tools/` | 应急诊断工具（PC 侧） | 按需使用 |
+| `tools/` | PC 侧工具：`board_deploy.sh` 一键下发安装、应急诊断脚本 | `bash tools/board_deploy.sh` |
 | `docs/` | 交付文档 + 集成指南 | 按需查阅 |
 | `docs/images/` | 验证截图（按链路顺序 01→05 编号） | 画面质量佐证 |
 | `gstreamer_module/` | 交叉编译源码与脚本 | 见 [`gstreamer_module/README.md`](gstreamer_module/README.md)，细节见集成指南 |
@@ -132,3 +161,15 @@ flex_srs.sh live1
 2. **ffmpeg RTP 桥不可省**：`rtspsrc` 与 flex RTP 序号不兼容，直连必然 0 buffer 死锁。
 
 更多排障条目见 [docs/PROJECT_DOC.md 第 7 章](docs/PROJECT_DOC.md)。
+
+---
+
+## 已知问题（待处理）
+
+1. **部署包里的 `whip_push` 与 `whip_push.c` 不是同一版本**。实测运行日志里没有源码
+   `main()` 必然打印的 `[whip] srcbin: ...` 和 `[whip] fixed rtph264pay ssrc=1111111`，
+   `flex_srs.sh test` 会卡在 `videotestsrc0 ... reason not-linked (-1)`。
+   上游链路本身没问题（同参数 `gst-launch ... ! fakesink` 返回 0），
+   需要在编译机用当前源码重编 `whip_push` 并重新打包发布。
+2. **部署包缺 `gst-plugin-scanner`**。安装时会告警，插件扫描退回进程内（能跑，首次启动慢）。
+   补齐需在编译机 `cd gstreamer_module && bash build.sh install` 重新打包。

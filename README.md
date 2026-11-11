@@ -164,12 +164,15 @@ flex_srs.sh live1
 
 ---
 
-## 已知问题（待处理）
+## 已修复记录（2026-11-11）
 
-1. **部署包里的 `whip_push` 与 `whip_push.c` 不是同一版本**。实测运行日志里没有源码
-   `main()` 必然打印的 `[whip] srcbin: ...` 和 `[whip] fixed rtph264pay ssrc=1111111`，
-   `flex_srs.sh test` 会卡在 `videotestsrc0 ... reason not-linked (-1)`。
-   上游链路本身没问题（同参数 `gst-launch ... ! fakesink` 返回 0），
-   需要在编译机用当前源码重编 `whip_push` 并重新打包发布。
-2. **部署包缺 `gst-plugin-scanner`**。安装时会告警，插件扫描退回进程内（能跑，首次启动慢）。
-   补齐需在编译机 `cd gstreamer_module && bash build.sh install` 重新打包。
+1. **部署包内 `whip_push` 与源码不同步**（旧包内二进制 md5 `bcd670d8…`）。已在阿里云编译机
+   `/root/sdk/AX650_SDK_V3.16.0_20261103160857_NO5387/third-party/gstreamer` 用仓库
+   `apps/whip_push.c` 重编并重新打包，新二进制 md5 `16467ec3…`，含 `a=ssrc` 注入与
+   `rtph264pay ssrc=1111111` 固定。旧二进制会让 SRS 返回 131 字节无 m-line 的 answer，
+   `webrtcbin` 永远无法 `connection established`。
+2. **部署包缺 `gst-plugin-scanner`**。新包已包含 `libexec/gstreamer-1.0/`，
+   包顶层为 `bin / lib / libexec`。
+
+> ⚠️ 待办：GitHub Release 1.0.0 的 `gstreamer-aarch64-deploy.tar.gz` 与 `sha256` 仍是旧资产，
+> 需重新上传，否则从 Release 下载会拿到旧二进制；仓库内已入库的包是最新修复版。

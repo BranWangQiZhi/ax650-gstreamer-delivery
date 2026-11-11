@@ -2,16 +2,38 @@
 # flex ch1 -> ffmpeg RTP 桥 -> whip_push (WHIP/UDP) -> 阿里云 SRS
 # 成功标准: connection established 且 SRS recv_bytes 相对本次推流的基线真实增长
 #          (防"假连接空推": 会话 active 但一个 RTP 包都没进去)
-# 用法: flex_srs.sh [流名, 默认 live1]
+# 用法: flex_srs.sh [流名, 默认 live1]     # 正常链路: flex ch1 -> RTP 桥 -> whip_push
+#       flex_srs.sh test [流名, 默认 test] # 彩条自测推流, 不依赖摄像头/RTSP/RTP桥
+#                                          # (验证 GStreamer + whip_push + 信令, 排除码流源问题)
 # 部署路径: /usr/local/bin/flex_srs.sh
-. /etc/profile.d/gstreamer.sh
-STREAM=${1:-live1}
+TEST=0
+case "$1" in
+  test|-t|--test) TEST=1; shift ;;
+esac
+STREAM=${1:-$( [ "$TEST" = "1" ] && echo test || echo live1 )}
 API="http://121.40.107.62:1985/api/v1/streams/"
 URL="http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream=$STREAM"
 SRC="rtsp://127.0.0.1:8554/ch1"
 BRIDGE_LOG=/tmp/ffmpeg_bridge.log
 WHIP_LOG=/tmp/srs_whip.log
-PIPE='udpsrc port=5004 buffer-size=4194304 caps="application/x-rtp,media=video,clock-rate=90000,encoding-name=H264,payload=96" ! rtph264depay ! h264parse ! rtph264pay config-interval=-1 pt=96'
+
+# 运行环境: 优先 source profile.d; 再兜底自设(非登录 shell / profile 未生成也能跑)
+[ -f /etc/profile.d/gstreamer.sh ] && . /etc/profile.d/gstreamer.sh
+export PATH=/usr/local/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+[ -f /usr/local/lib/libglibc230_compat.so ] && \
+  export LD_PRELOAD=/usr/local/lib/libglibc230_compat.so
+export GST_PLUGIN_SYSTEM_PATH=/usr/local/lib/gstreamer-1.0
+export GST_PLUGIN_SCANNER=/usr/local/libexec/gstreamer-1.0/gst-plugin-scanner
+export GST_REGISTRY=/usr/local/var/gst-registry.bin
+
+if [ "$TEST" = "1" ]; then
+  # 彩条自测: 源码直编, 不经 RTP 桥
+  PIPE='videotestsrc is-live=true pattern=smpte ! video/x-raw,width=1280,height=720,framerate=30/1 ! videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=2000 key-int-max=30 ! rtph264pay config-interval=-1 pt=96'
+else
+  # 正常链路: RTP 桥发来的 UDP RTP/H264 转 WHIP
+  PIPE='udpsrc port=5004 buffer-size=4194304 caps="application/x-rtp,media=video,clock-rate=90000,encoding-name=H264,payload=96" ! rtph264depay ! h264parse ! rtph264pay config-interval=-1 pt=96'
+fi
 
 # 取 SRS 当前 recv_bytes(纯数字, 取不到输出 0)
 get_recv() {
@@ -58,19 +80,22 @@ kb_since() {  # $1=起始字节, 输出最近这段的近似 kbps
   echo $(( (B2 - B1) * 8 / 8 / 1000 )) $B2
 }
 
-# 0) 源检查: 8554 没监听时 ffmpeg 会瞬间退出, 直接报清楚原因, 不要傻等
-if ! netstat -lnt 2>/dev/null | grep -q ':8554'; then
-  echo "SOURCE_MISSING: 127.0.0.1:8554 无监听 (flex_vision 没起来?)"
-  echo "  先执行: /usr/local/bin/flex_start.sh"
-  exit 2
-fi
-
-# 1) 先保证 RTP 桥活着(源曾断过 / 板子重启后, 桥走的是重启循环)
-if ! bridge_alive; then
-  if [ -s "$BRIDGE_LOG" ] && tail -5 "$BRIDGE_LOG" | grep -q 'Connection refused'; then
-    echo "SOURCE_NOT_READY: 8554 在监听但 ch1 被拒, 检查 flex_vision 是否真的编码出流"
+if [ "$TEST" != "1" ]; then
+  # 0) 源检查: 8554 没监听时 ffmpeg 会瞬间退出, 直接报清楚原因, 不要傻等
+  if ! netstat -lnt 2>/dev/null | grep -q ':8554'; then
+    echo "SOURCE_MISSING: 127.0.0.1:8554 无监听 (flex_vision 没起来?)"
+    echo "  先执行: /usr/local/bin/flex_start.sh"
+    echo "  或改用自测: flex_srs.sh test"
+    exit 2
   fi
-  start_bridge
+
+  # 1) 先保证 RTP 桥活着(源曾断过 / 板子重启后, 桥走的是重启循环)
+  if ! bridge_alive; then
+    if [ -s "$BRIDGE_LOG" ] && tail -5 "$BRIDGE_LOG" | grep -q 'Connection refused'; then
+      echo "SOURCE_NOT_READY: 8554 在监听但 ch1 被拒, 检查 flex_vision 是否真的编码出流"
+    fi
+    start_bridge
+  fi
 fi
 
 # 2) whip_push 还在跑: 只要码流恢复就沿用原会话(零中断), 不重启
@@ -101,7 +126,8 @@ while [ $i -lt 8 ]; do
   B=$(get_recv)
   DELTA=$((B - BASE))
   if [ "$DELTA" -gt 500000 ]; then
-    echo "PUSH_OK try=$i recv_delta_MB=$((DELTA/1048576)) recv_total_MB=$((B/1048576))"
+    echo "PUSH_OK try=$i stream=$STREAM recv_delta_MB=$((DELTA/1048576)) recv_total_MB=$((B/1048576))"
+    [ "$TEST" = "1" ] && echo "TEST_OK: 彩条链路正常, 问题应在码流源(flex/RTP桥)"
     exit 0
   fi
   echo "try=$i fake-connection (delta_bytes=$DELTA), retrying..."
@@ -109,6 +135,8 @@ while [ $i -lt 8 ]; do
   wait_publish_released
   i=$((i+1))
 done
-echo "PUSH_FAIL"
-[ -s "$BRIDGE_LOG" ] && tail -3 "$BRIDGE_LOG"
+echo "PUSH_FAIL stream=$STREAM"
+if [ "$TEST" != "1" ]; then
+  [ -s "$BRIDGE_LOG" ] && tail -3 "$BRIDGE_LOG"
+fi
 tail -3 "$WHIP_LOG" 2>/dev/null

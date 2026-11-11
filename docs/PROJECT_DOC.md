@@ -86,19 +86,17 @@ gstreamer_delivery/               ← 仓库根 = 交付包根
 │
 ├── docs/                           全部技术文档
 │   ├── PROJECT_DOC.md              ← 本文档（完整技术资料）
-│   ├── GStreamer_WebRTC集成指南.md   SDK 交叉编译 + mediamtx 验证细节
+│   ├── GStreamer_WebRTC集成指南.md   SDK 交叉编译 + 阿里云 SRS 推流验证细节
 │   └── images/                     链路验证截图（01→05 按链路顺序）
 │       ├── 01_ch0_板端采集.jpg
 │       ├── 02_ch1_webrtc拉流.jpg
-│       ├── 03_mediamtx_回放.jpg
+│       ├── 03_彩条推流回放.jpg
 │       ├── 04_relay链路_回放.jpg
 │       └── 05_画面质量验证.jpg       FLV 抽帧验证图（鱼眼画面清晰无花屏）
 │
 ├── board/                          开发板文件
-│   ├── gstreamer.sh                 → /etc/profile.d/gstreamer.sh   运行环境变量
-│   ├── flex_srs.sh                  → /usr/local/bin/                ★ 生产：WHIP 直推
-│   ├── whip_test.sh                 → /usr/local/bin/                彩条自测
-│   └── deploy_board.sh              PC 侧一键下发脚本
+│   ├── flex_srs.sh                  → /usr/local/bin/                ★ 生产：WHIP 直推（test 参数 = 彩条自测）
+│   └── gst_install.sh               板端一键安装（运行时+业务脚本，在线下载执行）
 │
 ├── server/                         阿里云服务器文件
 │   ├── flv_live.html                → players/flv_live.html          HTTP-FLV 播放页
@@ -133,21 +131,17 @@ gstreamer_delivery/               ← 仓库根 = 交付包根
 ### 4.1 开发板（首次部署）
 
 ```bash
-# 1) GStreamer 运行环境（若未装）
-#    在编译服务器打包后传到板子
-tar xzf gstreamer-aarch64-deploy.tar.gz -C /usr/local
-#    确认 /usr/local/bin/whip_push、/usr/local/lib/libglibc230_compat.so 存在
+# 1) GStreamer 运行时 + 业务脚本, 一条命令装齐（含自动生成 /etc/profile.d/gstreamer.sh）
+curl -fsSL https://raw.githubusercontent.com/BranWangQiZhi/ax650-gstreamer-delivery/main/board/gst_install.sh | sh
+#    确认 /usr/local/bin/ 下 whip_push、flex_start.sh、flex_srs.sh、rtp_bridge.sh 存在
 
-# 2) 下发脚本（在 PC 的 Git Bash）
-cd delivery/board && sh deploy_board.sh
-
-# 3) 板子重连或手动生效环境
+# 2) 板子重连或手动生效环境
 . /etc/profile.d/gstreamer.sh
 
-# 4) 自测（推彩条，排除摄像头/编码问题）
-whip_test.sh
+# 3) 自测（推彩条，排除摄像头/编码问题）
+flex_srs.sh test
 
-# 5) 正式推流
+# 4) 正式推流
 flex_srs.sh live1
 # 期望输出: PUSH_OK try=N recv_MB=xx
 ```
@@ -327,7 +321,7 @@ insmod /soc/ko/ax_vsync_ctrl.ko
 | 时间 | 项目 | 结果 |
 |---|---|---|
 | 13:35 | GStreamer 1.22.12 交叉编译（21 步） | ✅ stage/bin 产物齐全 |
-| 13:45 | 部署到板 + 彩条推流 mediamtx | ✅ 浏览器可看，无花屏 |
+| 13:45 | 部署到板 + 彩条推流验证 | ✅ 浏览器可看，无花屏 |
 | 15:00 | flex ch1 RTSP → WebRTC 转发（局域网） | ✅ 25MB+ 流入，抽帧清晰 |
 | 16:14 | 首次 WHIP 直推阿里云 SRS | ✅ FLV 5s 收 4.7MB |
 | 17:30 | 排查公网丢包致 IDR 破碎 | ✅ 定位为 8Mbps 码率问题 |

@@ -1,24 +1,24 @@
-# AX650 SDK 集成 GStreamer 1.22.12 + WebRTC 推流 mediamtx 指南
+# AX650 SDK 集成 GStreamer 1.22.12 + WebRTC(WHIP) 推流阿里云 SRS 指南
 
 > 环境：阿里云编译服务器（Ubuntu 22.04，交叉工具链 gcc-arm-10.3-2021.07 aarch64）→ AX650 开发板（glibc 2.30）
-> 模块位置：`third-party/gstreamer/`；已验证彩条 720p H264 通过 WHIP 推流到 mediamtx 并成功拉流回放。
+> 模块位置：`third-party/gstreamer/`；已验证彩条 720p H264 通过 WHIP 推流到阿里云 SRS 并成功拉流回放。
 
 ---
 
 ## 1. 总体架构
 
 ```
-┌─────────────────── 阿里云服务器 ───────────────────┐      ┌────── 开发板 ──────┐      ┌──── Windows PC ────┐
-│ ax650_sdk/third-party/gstreamer                    │      │ /usr/local/{bin,   │      │ mediamtx.exe       │
-│   tarballs/  源码包(19个)                           │ tar→ │   lib, libexec}    │ WHIP │  HTTPS :8889       │
-│   build.sh   交叉编译 21 步                          │ scp→ │   whip_push        │ ───→ │  RTSP  :8554       │
-│   apps/whip_push.c  WHIP 信令客户端                 │      │   whip_test.sh     │      │  HLS   :8888       │
-│   apps/patch_glibc_ver.py  glibc 版本降级           │      │   gst-launch-1.0   │      │  API   :9997       │
-│   gstreamer-aarch64-deploy.tar.gz  部署包           │      └────────────────────┘      └────────────────────┘
-└────────────────────────────────────────────────────┘
+┌────────────── 阿里云编译服务器 ──────────────┐   ┌──── 开发板 ────┐   ┌─── 阿里云 SRS 媒体服务器 (121.40.107.62) ───┐
+│ ax650_sdk/third-party/gstreamer              │   │ /usr/local/{   │   │ WHIP/WHEP(HTTP-API)      :1985              │
+│   tarballs/  源码包(19个)                     │   │   bin, lib,    │   │ WebRTC ICE(TCP+UDP)      :8000              │
+│   build.sh   交叉编译 21 步                    │ tar→│  libexec}    │   │ HTTP-FLV / HLS          :8080              │
+│   apps/whip_push.c  WHIP 信令客户端           │ scp→│  whip_push   │WHIP│ RTMP                     :1935             │
+│   apps/patch_glibc_ver.py  glibc 版本降级     │   │  flex_srs.sh   │ ──→│ API: /api/v1/streams/                      │
+│   gstreamer-aarch64-deploy.tar.gz  部署包     │   │  gst-launch-1.0│   │ 播放页: /players/rtc_player.html           │
+└──────────────────────────────────────────────┘   └────────────────┘   └────────────────────────────────────────────┘
 ```
 
-数据链路：`videotestsrc → videoconvert → x264enc → rtph264pay → webrtcbin → WHIP(HTTPS) → mediamtx → WHEP/RTSP/HLS 拉流`
+数据链路：`videotestsrc → videoconvert → x264enc → rtph264pay → webrtcbin → WHIP(HTTP) → SRS → WHEP/HTTP-FLV/RTMP 拉流`
 
 ## 2. third-party/gstreamer 模块结构
 
@@ -81,7 +81,7 @@ ssh root@192.168.137.77
 tar -xzf /tmp/gstreamer-aarch64-deploy.tar.gz -C /usr/local
 ```
 
-板子环境变量已写入 `/etc/profile.d/gstreamer.sh`（登录 shell 自动生效）：
+板子环境变量已由 `gst_install.sh` 写入 `/etc/profile.d/gstreamer.sh`（登录 shell 自动生效）：
 
 ```sh
 export PATH=/usr/local/bin:$PATH
@@ -101,7 +101,7 @@ gst-inspect-1.0 webrtcbin     # WebRTC Bin
 gst-inspect-1.0 x264enc       # x264 H.264 Encoder
 ```
 
-## 5. WebRTC 推流到 mediamtx
+## 5. WebRTC 推流到阿里云 SRS
 
 ### 5.1 whipsink 的替代品：whip_push
 
@@ -115,31 +115,29 @@ GStreamer **1.22 没有 whipsink**（1.24+ 才有，且依赖 libsoup3/nghttp2/s
 ### 5.2 推流命令
 
 ```bash
-# 彩条测试流（快捷脚本）
-whip_test.sh
+# 彩条测试流（快捷方式，flex_srs.sh test = 彩条自测推流）
+flex_srs.sh test
 
 # 完整写法
-whip_push https://192.168.137.1:8889/live/whip \
+whip_push http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream=test \
   "videotestsrc is-live=true pattern=smpte ! video/x-raw,width=1280,height=720,framerate=30/1 \
    ! videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=2000 key-int-max=30 \
    ! rtph264pay config-interval=-1 pt=96"
 ```
 
-- mediamtx ≥ 1.9 的 WebRTC 端口 8889 是 **HTTPS**（自动生成 auto.crt/auto.key），URL 必须写 `https://`，否则报
-  `Client sent an HTTP request to an HTTPS server.`
+- SRS 的 WHIP 端口 1985 是 **HTTP**，URL 写 `http://` 即可（无证书问题）。
 - 换真实码流时，把第一个元素换成实际源（如 `v4l2src`），其余编码部分不变。
 
-### 5.3 拉流验证（PC 浏览器 / ffprobe）
+### 5.3 拉流验证（浏览器 / ffprobe）
 
-- **WHEP 浏览器播放**：打开 `https://192.168.137.1:8889/live`（自签证书，点"继续访问"）
-- **RTSP**：`ffprobe rtsp://192.168.137.1:8554/live`
-- **mediamtx 状态 API**：
+- **浏览器 WebRTC 播放页**：打开 `http://121.40.107.62:8080/players/rtc_player.html?autostart=true&stream=test`
+- **HTTP-FLV**：`ffprobe http://121.40.107.62:8080/live/test.flv`
+- **SRS 状态 API**：
   ```bash
-  curl http://127.0.0.1:9997/v3/paths/list          # ready:true, tracks:[H264], 1280x720
-  curl http://127.0.0.1:9997/v3/webrtcsessions/list # peerConnectionEstablished:true
+  curl http://121.40.107.62:1985/api/v1/streams/   # publish.active:true, video 1280x720, recv_bytes 增长
   ```
 
-本次验证结果：`inboundBytes 2.3MB+`、`rtpPacketsLost 0`、RTSP 拉流解码出的彩条图像无花屏。
+本次验证结果：FLV 拉流 `recv_bytes 2.3MB+`、抽帧彩条图像无花屏。
 
 ### 5.4 RTSP → WebRTC 转发（flex_vision / 任意 RTSP 源，不转码直通）
 
@@ -148,7 +146,7 @@ whip_push 现已支持**动态 pad 源**（rtspsrc），可以直接把板子上
 
 ```bash
 # 板子上运行（源为 flex_vision 的 RTSP，改为实际地址）
-whip_push https://192.168.137.1:8889/live2/whip \
+whip_push http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream=rtsp2 \
   "rtspsrc location=rtsp://127.0.0.1:554/ch0 protocols=tcp latency=100 \
    ! rtph264depay ! h264parse ! rtph264pay config-interval=-1 pt=96"
 ```
@@ -163,8 +161,7 @@ whip_push https://192.168.137.1:8889/live2/whip \
    工具会给"无 sink pad 的源元素"手动挂 `pad-added` 补链，并清掉误建的 ghost sink pad。
 3. **glibc 兼容**：部署时需 `libglibc230_compat.so`（LD_PRELOAD），见 `/etc/profile.d/gstreamer.sh`。
 
-实测结果（2026-11-10）：板子拉 `rtsp://192.168.137.1:8554/live`（彩条）→ WHIP 推回
-`live2` → mediamtx 双路 ready → RTSP 拉 `live2` 解码，彩条无花屏。
+实测结果（2026-11-10）：板子拉本地 RTSP（彩条）→ WHIP 推 SRS 双路流 → FLV 拉流解码，彩条无花屏。
 
 ### 5.5 取流方式选型：RTSP vs VENC 直连
 
@@ -204,8 +201,7 @@ select()/poll fd → AX_VENC_GetStream(chn, 100ms) → 拿到 AX_VENC_STREAM_T
 `u32Bitrate` 从 8192 降到 **2048 Kbps**（重启 flex_vision 生效）后，
 IDR 体积缩小约 4 倍，WHIP 直推阿里云完全打通（8s FLV 拉 1.9MB≈2Mbps，
 抽帧验证无花屏）。**公网 WHIP 直推的可用码率上限约 2~3Mbps**。
-局域网推 WHIP（如推 PC mediamtx）丢包≈0，
-8Mbps 也无此问题。板上无法输出低分辨率：flex_vision 的 sensor 配置是
+局域网推 WHIP 丢包≈0，8Mbps 也无此问题。板上无法输出低分辨率：flex_vision 的 sensor 配置是
 传感器原生 2592×1944，VENC 直接编码 ISP 输出，ini 无 crop/scale 项；
 axenc 硬编需 axmm 设备 ctx（与 flex 冲突），板上也没有 /dev/video*。
 
@@ -246,7 +242,7 @@ webrtcbin 报 "Answer doesn't have the same number of m-lines as the offer"。
 | 7 | 板子报 `GLIBC_2.33 not found` | 工具链 sysroot 是 glibc 2.33，板子是 2.30 | `apps/patch_glibc_ver.py` 三步降级（.dynstr 字符串等长替换 + vna_hash 重算 + versym→无版本） |
 | 8 | 补丁后报 `undefined symbol: stat64, version GLIBC_2.17` | aarch64 glibc 2.30 没有 stat64（2.33 才新增） | `libglibc230_compat.so` 用 syscall 实现这 4 个符号，`LD_PRELOAD` 加载 |
 | 9 | `External plugin loader failed` | 打包漏了 libexec | install/tarball 增加 `libexec/`（gst-plugin-scanner） |
-| 10 | `Client sent an HTTP request to an HTTPS server` | mediamtx 8889 强制 HTTPS | whip_push 支持 https（OpenSSL，VERIFY_NONE） |
+| 10 | `Client sent an HTTP request to an HTTPS server` | 早期本地 HTTPS 接收端强制 HTTPS | whip_push 支持 https（OpenSSL，VERIFY_NONE）；SRS WHIP 为 HTTP 无此问题 |
 | 11 | `streaming stopped, reason not-linked` | sink pad 在 answer 协商后才出现，源先 PLAYING 就报错 | 先 PAUSED，pad-added 链接成功后再切 PLAYING |
 | 12 | x264 插件没编出来 | ugly 默认 `-Dx264=disabled` 且属 GPL | `-Dx264=enabled -Dgpl=enabled` |
 | 13 | SRS 返回 131B 残缺 answer，报 `Answer doesn't have the same number of m-lines` | SRS 协商代码只有在 offer 带 `a=ssrc:` 行时才把 track 加入 stream_desc；webrtcbin 的 offer 不带 ssrc | whip_push 固定 rtph264pay ssrc=1111111 并在 offer 注入 `a=ssrc` + `cname` 行 |
@@ -261,10 +257,10 @@ GST_DEBUG=3 gst-inspect-1.0 webrtcbin
 tail -f /tmp/whip_push.log
 
 # 板子：手动跑（前台，带详细日志）
-GST_DEBUG=3 whip_push https://192.168.137.1:8889/live/whip "whip_test.sh 里的 pipeline"
+GST_DEBUG=3 whip_push http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream=test "flex_srs.sh test 里的 pipeline"
 
-# PC：mediamtx 状态
-curl http://127.0.0.1:9997/v3/paths/list
+# SRS 状态：推流会话与码率
+curl http://121.40.107.62:1985/api/v1/streams/
 
 # 检查 glibc 版本需求是否还有残留
 objdump -T /usr/local/lib/libglib-2.0.so.0 | grep GLIBC_2.3
@@ -290,15 +286,12 @@ bash build.sh clean       # 全部清理
 
 # ===== 开发板 =====
 . /etc/profile.d/gstreamer.sh
-whip_test.sh              # 彩条推流到 https://192.168.137.1:8889/live/whip
+flex_srs.sh test          # 彩条自测推流（默认推到阿里云 SRS，流名 test）
 flex_srs.sh [流名]        # flex ch1 推流到阿里云 SRS（默认 live1）
 killall whip_push         # 停止推流
 
-# ===== PC =====
-# 浏览器打开: https://192.168.137.1:8889/live
-curl http://127.0.0.1:9997/v3/paths/list
-
-# ===== 阿里云 SRS 观看 =====
+# ===== 观看（浏览器 / 拉流）=====
 # 浏览器: http://121.40.107.62:8080/players/rtc_player.html?autostart=true&stream=live1
 ffplay http://121.40.107.62:8080/live/live1.flv
+curl http://121.40.107.62:1985/api/v1/streams/
 ```

@@ -39,7 +39,7 @@ GitHub 慢或被墙时套镜像：
 GST_MIRROR=https://ghproxy.net/ curl -fsSL https://raw.githubusercontent.com/BranWangQiZhi/ax650-gstreamer-delivery/main/board/gst_install.sh | sh
 ```
 
-其他用法：`sh install.sh -n`（只体检）、`-v <tag>`（指定版本）、`-f <本地包>`（离线）。
+其他用法：`sh install.sh -n`（只体检）、`-v <tag>`（指定版本）。
 
 ---
 
@@ -51,7 +51,10 @@ GST_MIRROR=https://ghproxy.net/ curl -fsSL https://raw.githubusercontent.com/Bra
 # 板子重启后：先起相机服务（含 PWM 同步前置 + ax_vsync_ctrl.ko），再推流
 flex_start.sh                     # 看到 RTSP_READY 才算相机就绪
 . /etc/profile.d/gstreamer.sh     # 非交互 SSH 必须
-flex_srs.sh live1                 # 看到 PUSH_OK / ALREADY_PUSHING 即成功
+flex_srs.sh                # 默认：flex ch1 → RTP 桥 → whip_push → SRS（流名 live1）
+flex_srs.sh live2          # 正常链路，指定流名
+flex_srs.sh test           # 彩条自测推流（默认流名 test），不依赖摄像头/RTSP/RTP桥
+flex_srs.sh test mytest    # 彩条自测，指定流名
 tail -f /tmp/srs_whip.log
 ```
 
@@ -73,7 +76,7 @@ gstreamer_delivery/
 ├── README.md            ← 本文件：交付门面 / 5 分钟上手
 ├── docs/                技术文档与验证截图
 │   ├── PROJECT_DOC.md               完整交付文档（架构/部署/排障）
-│   ├── GStreamer_WebRTC集成指南.md   SDK 交叉编译与 mediamtx 验证
+│   ├── GStreamer_WebRTC集成指南.md   SDK 交叉编译与阿里云 SRS 推流验证
 │   └── images/                      链路各环节验证截图
 ├── board/               板端推流脚本 + 一键下发
 ├── server/              服务端播放页 + SRS 重启 + 一键下发
@@ -83,7 +86,7 @@ gstreamer_delivery/
 
 | 目录 | 内容 | 怎么用 |
 |---|---|---|
-| `board/` | 板上全部脚本 + 一键下发 | `cd board && sh deploy_board.sh` |
+| `board/` | 板上全部脚本 + 板端一键安装 | `curl .../gst_install.sh \| sh`（见下文） |
 | `server/` | 播放页 + SRS 重启 + 一键下发 + 发布工具 | `cd server && sh deploy_server.sh` |
 | `tools/` | 应急诊断工具（PC 侧） | 按需使用 |
 | `docs/` | 交付文档 + 集成指南 | 按需查阅 |
@@ -94,13 +97,10 @@ gstreamer_delivery/
 
 | 文件 | 部署到 | 作用 |
 |---|---|---|
-| `gstreamer.sh` | `/etc/profile.d/` | GStreamer 环境变量（PATH/LD_PRELOAD/插件路径） |
 | `flex_start.sh` | `/usr/local/bin/` | ★ 启动相机服务：PWM 同步前置 + insmod + 等 8554 就绪（重启后必跑） |
-| `flex_srs.sh` | `/usr/local/bin/` | ★ 生产：WHIP 直推阿里云，内置源检查 / 会话回收等待 / 桥守护 / 假连接检测 |
+| `flex_srs.sh` | `/usr/local/bin/` | ★ 生产：WHIP 直推阿里云，内置源检查 / 会话回收等待 / 桥守护 / 假连接检测；`flex_srs.sh test` 彩条自测（排查是环境问题还是码流问题） |
 | `rtp_bridge.sh` | `/usr/local/bin/` | ★ RTP 桥守护：ffmpeg RTSP→UDP:5004，断开自动重连（不要直接裸跑 ffmpeg） |
-| `whip_test.sh` | `/usr/local/bin/` | 彩条自测（排查是环境问题还是码流问题） |
-| `gst_install.sh` | 不部署，在线下载执行 | ★ 外部同事一条命令装 GStreamer 运行时 |
-| `deploy_board.sh` | PC 上执行 | 一键下发全部脚本 + chmod |
+| `gst_install.sh` | 不部署，在线下载执行 | ★ 板端一条命令装齐：GStreamer 运行时 + 业务脚本（自动生成 `/etc/profile.d/gstreamer.sh`） |
 
 ### server/ 文件对照
 

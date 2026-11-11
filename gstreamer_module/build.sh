@@ -344,6 +344,16 @@ install_rootfs() {
   cp -d "$STAGE"/libexec/gstreamer-1.0/* "$ROOTFS/libexec/gstreamer-1.0/" 2>/dev/null || true
   # strip plugins/lib for size
   ${CROSS}strip --strip-unneeded "$ROOTFS"/lib/gstreamer-1.0/*.so 2>/dev/null || true
+  # board 业务脚本(交付仓库镜像才有 ../board; SDK third-party 内镜像无此目录则跳过)
+  BOARD_DIR="$CUR/../board"
+  if [ -d "$BOARD_DIR" ]; then
+    for s in flex_start.sh flex_srs.sh rtp_bridge.sh; do
+      cp "$BOARD_DIR/$s" "$STAGE/bin/$s"
+    done
+    echo "Board scripts packed into stage/bin: flex_start.sh flex_srs.sh rtp_bridge.sh"
+  else
+    echo "WARN: $BOARD_DIR 不存在, 部署包不含业务脚本(仅运行时)"
+  fi
   # deploy tarball for the board
   tar -czf "$CUR/gstreamer-aarch64-deploy.tar.gz" -C "$STAGE" bin lib libexec
   echo "Install gstreamer to SDK rootfs success: $ROOTFS"

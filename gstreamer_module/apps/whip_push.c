@@ -1,7 +1,8 @@
 /*
  * whip_push.c - 极简 WHIP (WebRTC HTTP Ingestion Protocol) 推流客户端
  *
- * 用途: AX650 开发板上把 GStreamer 编码流通过 WebRTC 推送到 mediamtx。
+ * 用途: AX650 开发板上把 GStreamer 编码流通过 WebRTC(WHIP) 推送到阿里云 SRS
+ *       （也兼容任意标准 WHIP 端点）。
  *
  * 设计说明:
  *   GStreamer 1.22 没有 whipsink 元素(需要 libsoup3 + nghttp2 + sqlite 一堆依赖)，
@@ -11,17 +12,18 @@
  *     3. 解析 201 Created 响应体作为 answer -> set-remote-description
  *     4. answer 生效后 webrtcbin 才创建 sink pad, 此时把编码器接上并切 PLAYING
  *
- *   注: mediamtx >= 1.9 的 WebRTC 服务默认是 HTTPS(自签证书), 所以支持 https://。
+ *   注: 支持 http:// 和 https://；https 走 SDK OpenSSL 且关闭证书校验(VERIFY_NONE)，
+ *       自签证书的 WHIP 端点也能推。
  *
  * 编译: 见 build.sh
  * 用法: ./whip_push <whip_url> "<pipeline 到 rtph264pay 为止>"
  *   1) 本地测试彩条:
- *   ./whip_push https://192.168.137.1:8889/live/whip \
+ *   ./whip_push http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream=test \
  *     "videotestsrc is-live=true ! video/x-raw,width=1280,height=720,framerate=30/1 \
  *      ! videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=2000 key-int-max=30 \
  *      ! rtph264pay config-interval=-1 pt=96"
  *   2) RTSP 转发(flex_vision/任意 RTSP 源, 不转码直通):
- *   ./whip_push https://192.168.137.1:8889/live2/whip \
+ *   ./whip_push http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream=rtsp2 \
  *     "rtspsrc location=rtsp://127.0.0.1:554/ch0 protocols=tcp latency=100 \
  *      ! rtph264depay ! h264parse ! rtph264pay config-interval=-1 pt=96"
  *

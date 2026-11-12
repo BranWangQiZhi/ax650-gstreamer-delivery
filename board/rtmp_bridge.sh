@@ -6,9 +6,9 @@
 # 原样封成 FLV 推到 SRS 1935。SRS 配了 rtmp_to_rtc on / http_remux，
 # 所以 WHEP(WebRTC) 和 HTTP-FLV 播放页都能拉到这一路。
 #
-# 为什么多路要用 RTMP: whip_push 把 rtph264pay 的 SSRC 硬编码成 1111111，
-# 多个实例同时 WHIP 会出现「publish.active=true 但 recv_bytes≈0」的假连接；
-# RTMP 每路一条独立 TCP 连接，天然不冲突，也不需要 UDP 端口规划。
+# 本脚本是 RTMP 备选方案：新版 flex_srs.sh 已支持 liveN -> axstreamN 多路 WHIP 并发，
+# 主链路不再需要 RTMP。早期多路 WHIP 失败的根因是旧脚本全局进程判断 + 共用 UDP 5004
+# + 按全局取 recv_bytes，并非 whip_push 的 SSRC 硬编码（每个 WHIP 会话 PC 独立）。
 #
 # 用法: rtmp_bridge.sh <rtsp源> <rtmp目标> [日志]
 # 部署路径: /usr/local/bin/rtmp_bridge.sh
@@ -19,7 +19,7 @@ export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 [ -f /usr/local/lib/libglibc230_compat.so ] && \
   export LD_PRELOAD=/usr/local/lib/libglibc230_compat.so
 
-SRC=${1:-rtsp://127.0.0.1:8554/ch1}
+SRC=${1:-rtsp://127.0.0.1:8554/axstream1}
 DST=${2:-rtmp://121.40.107.62:1935/live/live1}
 LOG=${3:-/tmp/rtmp_bridge.log}
 

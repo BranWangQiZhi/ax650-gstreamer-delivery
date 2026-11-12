@@ -7,7 +7,7 @@
 # 用法: rtp_bridge.sh [源 rtsp] [目标 rtp]
 # 部署路径: /usr/local/bin/rtp_bridge.sh
 . /etc/profile.d/gstreamer.sh
-SRC=${1:-rtsp://127.0.0.1:8554/ch1}
+SRC=${1:-rtsp://127.0.0.1:8554/axstream1}
 DST=${2:-rtp://127.0.0.1:5004}
 LOG=${LOG:-/tmp/ffmpeg_bridge.log}
 

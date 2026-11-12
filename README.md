@@ -8,7 +8,7 @@
 ## 现状（一屏速览）
 
 ```
-flex_vision ch1 (2592×1944 @ 2Mbps) → ffmpeg RTP 桥 → whip_push (WHIP/UDP)
+flex_vision axstreamN (2592×1944 @ 2Mbps) → ffmpeg RTP 桥 → whip_push (WHIP/WebRTC)
   → 阿里云 SRS 121.40.107.62:1985  →  浏览器 WHEP / HTTP-FLV
 ```
 
@@ -80,14 +80,21 @@ sh board/gst_install.sh -n                                      # 只体检，�
 # 板子重启后：先起相机服务（含 PWM 同步前置 + ax_vsync_ctrl.ko），再推流
 flex_start.sh                     # 看到 RTSP_READY 才算相机就绪
 . /etc/profile.d/gstreamer.sh     # 非交互 SSH 必须
-flex_srs.sh                # 默认：flex ch1 → RTP 桥 → whip_push → SRS（流名 live1）
-flex_srs.sh live2          # 正常链路，指定流名
-flex_srs.sh test           # 彩条自测推流（默认流名 test），不依赖摄像头/RTSP/RTP桥
-flex_srs.sh test mytest    # 彩条自测，指定流名
-tail -f /tmp/srs_whip.log
+flex_srs.sh                # 默认：摄像头 1(axstream1) → live1（WHIP/WebRTC）
+flex_srs.sh live2          # 摄像头 2(axstream2) → live2，可与上一路并存
+flex_srs.sh start live2    # 等价写法（start 是子命令，可省略）
+flex_srs.sh status         # 查看 5 路映射 / 帧率 / 进程
+flex_srs.sh stop           # 停全部（也可 stop live2 只停一路）
+flex_srs.sh test           # 彩条自测推流，不依赖摄像头/RTSP/RTP 桥
+tail -f /tmp/srs_whip_live1.log
 ```
 
-> 推流已在正常运行时，`flex_srs.sh` 会 8 秒内返回 `ALREADY_PUSHING`，不会打断现有流；只有码流确实为 0 才重建会话。
+> `liveN` 的 N 同时是摄像头通道号和 SRS 流名，全程 WHIP/WebRTC、不经 RTMP。
+> 直接写 `flex_srs.sh liveN` 即可，`flex_srs.sh start liveN` 是等价写法；
+> `start` 是子命令不是流名（旧版误当流名会推出 `stream=start` 的僵尸流）。
+> 同一路已在正常推流时，重复执行会在 8 秒内返回 `ALREADY_PUSHING`，不会打断现有流；
+> 只有该流 `recv_bytes` 8 秒增量为 0 才重建会话。
+> Ctrl+C 中断时脚本会清理本次拉起的后台进程，不留下占端口的僵尸。
 
 **服务器（121.40.107.62）验证**
 
@@ -98,37 +105,44 @@ timeout 6 curl -s http://127.0.0.1:8080/live/live1.flv | wc -c   # >0 才出流
 
 ---
 
-## 多路摄像头（live0 ~ live4）
+## 多路摄像头（live0 ~ live4）—— WHIP/WebRTC 一一对应
 
-⚠️ **`flex_srs.sh` 的参数是 SRS 流名，不是摄像头通道**，视频源固定 `ch1`；而且只要检测到
-已有 `whip_push` 在推，它就返回 `ALREADY_PUSHING` 直接退出。所以执行
-`flex_srs.sh live0 / live2 / live3 / live4` **不会创建新流**，播放页会出现
-「信令已应答 / ICE connected / 连接 connected」却黑屏——SRS 上那几个流只有播放器建的空对象
-（`publish.active=false`、`video=null`、`recv_bytes≈0`）。
+`flex_srs.sh liveN` 里的 **N 同时是摄像头通道号与 SRS 流名**，全程走 WHIP/WebRTC，不经 RTMP：
 
-板端 5 路 RTSP 通道是 `rtsp://127.0.0.1:8554/ch0` ~ `ch4`（都是 H.264 2592×1944@30fps）。
-多路用 `flex_multi.sh` 启，走 **RTMP 直推**（`rtmp_bridge.sh` 守护，每路一条独立 TCP 连接；
-SRS 配了 `rtmp_to_rtc on`，WHEP / HTTP-FLV 播放页都能拉）：
+| 摄像头 | RTSP 源 | 流名 | 播放页（`http://121.40.107.62:8080/players/` 下） |
+|---|---|---|---|
+| 0 | `axstream0` | `live0` | `webrtc_live.html?stream=live0` |
+| 1 | `axstream1` | `live1` | `webrtc_live.html?stream=live1` |
+| 2 | `axstream2` | `live2` | `webrtc_live.html?stream=live2` |
+| 3 | `axstream3` | `live3` | `webrtc_live.html?stream=live3` |
+| 4 | `axstream4` | `live4` | `webrtc_live.html?stream=live4` |
 
 ```sh
 flex_start.sh                 # 1) 等 RTSP_READY
-flex_srs.sh live1             # 2) ch1 -> live1（WHIP，低延迟，保持原样）
-flex_multi.sh start           # 3) ch0/2/3/4 -> live0/2/3/4（RTMP）
-flex_multi.sh status          #    查每路进程与 SRS 流状态
-flex_multi.sh stop            #    停掉这 4 路（不动 live1）
-flex_multi.sh start 3         #    只起/补一路 ch3 -> live3
+flex_srs.sh live1             # 2) 摄像头 1 -> live1
+flex_srs.sh start live2       # 3) 摄像头 2 -> live2（start 可省略，两路并存）
+flex_srs.sh live4             # 4) 摄像头 4 -> live4
+flex_srs.sh status            #    查看 5 路映射 / VENC 帧率 / 进程
+flex_srs.sh stop live4        #    只停这一路
+flex_srs.sh stop              #    停全部
+flex_srs.sh test              #    彩条自测，排查是环境还是码流源
 ```
 
-| 摄像头 | 流名 | 播放地址（`N` 换 0~4） |
-|---|---|---|
-| ch0 | live0 | `http://121.40.107.62:8080/players/webrtc_live.html?stream=liveN` |
-| ch1 | live1 | 同上（WHIP 推，延迟最低） |
-| ch2 / ch3 / ch4 | live2 / live3 / live4 | 同上；FLV 备选 `flv_live.html?stream=liveN` |
-
-> 为什么不用多个 `whip_push`：`whip_push` 把 `rtph264pay` 的 SSRC 硬编码成 `1111111`，
-> 多实例同时 WHIP 会出现 `publish.active=true` 但 `recv_bytes≈0` 的假连接；RTMP 没有这个问题。
-> 5 路合计约 10Mbps 上行，若卡顿把 ini 的 `[Encode] u32Bitrate` 降到 800~1000 并重启 `flex_vision`。
-> **推流起来后要刷新播放页**：旧 WHEP 会话是在没有 publisher 时建立的，SRS 不会给它补流。
+- 每路独立：UDP 端口 `5200+2*N`、RTP 桥、日志 `/tmp/ffmpeg_bridge_liveN.log` 与
+  `/tmp/srs_whip_liveN.log`；进程判断按流名隔离，互不打断，重复执行同一路返回 `ALREADY_PUSHING`。
+- **端口争抢防护**：`udpsrc` 默认 `reuse=true`，两个 whip_push 能同时 bind 同一 UDP 端口并静默抢包
+  （现象：HTTP 201 + `connection established`，但 `bufs=0`、`recv_bytes` 几乎不涨、脚本反复
+  `fake-connection`）。新版启动前会 `CLEANUP_PORT` 清掉该端口所有僵尸 whip_push，Ctrl+C 自动
+  清理本次后台进程，`stop all` 也会杀掉所有 whip_push 而不只 `liveN`。
+- 启动前读 `/proc/ax_proc/venc` 的 OutFps，通道没出帧直接报 `SOURCE_NO_FRAMES` 并列出可用通道，
+  避免把黑流推上去。
+- ⚠️ 板端 RTSP **只认 `axstream0`~`axstream4`**；写 `chN` 会被服务端回落到 `axstream0`（通道 0）。
+  `flex_multi.sh` / `rtmp_bridge.sh` 的 RTMP 方案仍保留作为备选，本项目主链路不用。
+- 实测 3 路（live1/2/4）并发稳定，每路约 2.6Mbps。`whip_push` 的 SSRC 相同**不影响**多实例
+  （每个 WHIP 会话是独立 PeerConnection）；早期多路失败的根因是旧脚本全局进程判断、共用
+  UDP 5004、按全局取 `recv_bytes`，均已修复。
+- 5 路合计约 10Mbps 上行，若卡顿把 ini 的 `[Encode] u32Bitrate` 降到 800~1000 并重启 `flex_vision`。
+- **推流起来后要刷新播放页**：旧 WHEP 会话是在没有 publisher 时建立的，SRS 不会给它补流。
 
 ---
 
@@ -163,10 +177,10 @@ gstreamer_delivery/
 | `flex_start.sh` | `/usr/local/bin/` | ★ 启动相机服务：PWM 同步前置 + insmod + 等 8554 就绪（重启后必跑） |
 | `S50vsync` | `/etc/init.d/` | ★ 开机自动做 PWM 寄存器写入 + 装载 ax_vsync_ctrl.ko（无需登录，先于相机服务） |
 | `S98imu` | `/etc/init.d/` | ★ 开机装载 ICM-45686 IMU 驱动（insmod + 探测 /dev/ax_imu + DRDY 中断检查，支持 start/stop/restart） |
-| `flex_srs.sh` | `/usr/local/bin/` | ★ 生产：WHIP 直推阿里云，内置源检查 / 会话回收等待 / 桥守护 / 假连接检测；`flex_srs.sh test` 彩条自测（排查是环境问题还是码流问题） |
-| `rtp_bridge.sh` | `/usr/local/bin/` | ★ RTP 桥守护：ffmpeg RTSP→UDP:5004，断开自动重连（不要直接裸跑 ffmpeg） |
-| `rtmp_bridge.sh` | `/usr/local/bin/` | ★ RTMP 桥守护：ffmpeg 把 `chN` 原样封 FLV 直推 SRS 1935，断线自动重连（多路用） |
-| `flex_multi.sh` | `/usr/local/bin/` | ★ 多路管理：`chN → liveN`，`start / stop / status`；默认补 ch0/2/3/4，live1 仍由 `flex_srs.sh` 推 |
+| `flex_srs.sh` | `/usr/local/bin/` | ★ 生产：`liveN → axstreamN` 一一对应（也支持 `start liveN`），WHIP/WebRTC 直推；支持多路并存 / `stop` / `status` / `test`，内置源帧率检查、端口僵尸清理、中断自清理、会话回收、桥守护、假连接检测 |
+| `rtp_bridge.sh` | `/usr/local/bin/` | ★ RTP 桥守护：ffmpeg RTSP→UDP `5200+2*N`，每路一个、断开自动重连（不要直接裸跑 ffmpeg） |
+| `rtmp_bridge.sh` | `/usr/local/bin/` | RTMP 桥守护（备选）：ffmpeg 把 RTSP 原样封 FLV 直推 SRS 1935；本项目主链路不用 |
+| `flex_multi.sh` | `/usr/local/bin/` | RTMP 多路管理（备选）：`axstreamN → liveN`，`start / stop / status`；本项目主链路不用 |
 | `gst_install.sh` | 不部署，在线下载执行 | ★ 板端一条命令装齐：GStreamer 运行时 + 业务脚本（自动生成 `/etc/profile.d/gstreamer.sh`） |
 
 ### server/ 文件对照
@@ -185,8 +199,17 @@ gstreamer_delivery/
 **推流看着在跑但播放端黑屏/卡** —— 大概率是"假连接空推"（板上 `connection established`、SRS `recv_bytes=0`）：
 
 ```bash
-# 板上重跑（v3 脚本会自动检测并重试）
+# 板上重跑（脚本会自动检测并重试）
 flex_srs.sh live1
+```
+
+若反复 `try=N fake-connection (delta_bytes≈1800)`，先查是不是两个 whip_push 抢同一 UDP 端口
+（常见于旧版 `flex_srs.sh start liveN` + Ctrl+C 留下的僵尸）：
+
+```bash
+netstat -lnup | grep 520        # 同一端口出现两个 whip_push 就是端口争抢
+flex_srs.sh stop                # 新版 stop 会清掉所有 whip_push / 桥 / ffmpeg
+flex_srs.sh live1               # 新版启动前自动 CLEANUP_PORT，一次即可恢复
 ```
 
 ---

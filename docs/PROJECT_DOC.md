@@ -17,7 +17,7 @@
 ┌─────────────────────────── AX650 开发板 (192.168.137.77) ───────────────────────────┐
 │                                                                                      │
 │  flex_vision (5MP 鱼眼摄像头)                                                         │
-│      │  RTSP  tcp://127.0.0.1:8554/ch1   2592×1944 H264 @ 2Mbps CBR                  │
+│      │  RTSP  tcp://127.0.0.1:8554/axstream1   2592×1944 H264 @ 2Mbps CBR                  │
 │      ▼                                                                               │
 │  ffmpeg RTP 桥                                                                        │
 │      │  ffmpeg -c copy -f rtp rtp://127.0.0.1:5004   （必须，见 5.2）                  │
@@ -57,7 +57,7 @@
 | 系统 | AX650 (aarch64)，glibc **2.30** |
 | 摄像头 | OG05B10 5MP 鱼眼，原生 2592×1944 |
 | 采集服务 | flex_vision，启动脚本 `/opt/bin/flex_vision_run.sh`，配置 `/opt/etc/cfg_og05b10_5cam_2lan.ini` |
-| RTSP 端口 | **8554**（不是 554），通道 `ch0 ch2  ch1 ch3 ch4` |
+| RTSP 端口 | **8554**（不是 554），通道 `axstream0` ~ `axstream4`（`chN` 会被回落到通道 0） |
 | GStreamer | 1.22.12，装在 `/usr/local`，环境脚本 `/etc/profile.d/gstreamer.sh` |
 
 ### 2.2 阿里云服务器
@@ -245,7 +245,7 @@ tail -f /tmp/ffmpeg_bridge.log     # RTP 桥日志
 
 # 停止
 kill $(ps | grep whip_push | grep -v grep | awk '{print $1}')
-kill $(ps | grep 'rtsp://127.0.0.1:8554/ch1' | grep -v grep | awk '{print $1}')
+kill $(ps | grep 'rtsp://127.0.0.1:8554/axstream1' | grep -v grep | awk '{print $1}')
 ```
 
 > ⚠️ 禁止用 `pkill -f 'whip_push'`：SSH 命令行自身含同样关键字，会把远端 shell 一起杀掉。
@@ -294,12 +294,14 @@ ffmpeg -v error -i /tmp/c.flv -frames:v 1 -y /tmp/f.jpg
 | **新板** `ffmpeg/ffprobe` 报 `version 'GLIBC_2.33' not found` | SDK 工具链 sysroot 是 glibc 2.33，单独安装的 FFmpeg 7.1 动态库没打降级补丁（GStreamer 部署包出厂已打过） | 用 `gstreamer_module/apps/patch_glibc_ver.py` 处理 `/usr/local/lib/libavformat.so.61.*`、`libavutil.so.59.*`，并保持 `LD_PRELOAD=/usr/local/lib/libglibc230_compat.so` 提供 `stat64/fstat64/lstat64` |
 | **新板** `gst-inspect-1.0: not found`、手工跑 `rtp_bridge.sh` 失败 | 板端缺 `/etc/profile.d/gstreamer.sh`（该文件由 `gst_install.sh` 生成，手工装的 GStreamer 没有） | 补写 PATH/LD_LIBRARY_PATH/LD_PRELOAD/GST_* 环境变量文件；`flex_srs.sh` 自带兜底，但从它启动的 `rtp_bridge.sh` 会继承 |
 | 板子能起相机但 SRS API `Connection refused`、服务器 `streams:[]` | 阿里云服务器重启后 SRS 没有开机自启 | 服务器上 `sh /usr/local/bin/srs_restart.sh`；已加 `srs.service` 开机自启 |
-| `flex_srs.sh live0/live2/...` 全部返回 `ALREADY_PUSHING`，播放页信令/ICE/连接全绿却黑屏 | 参数是**流名不是摄像头通道**，源固定 ch1；且检测到已有 whip_push 就直接退出，根本没建新流。SRS 上只有 WHEP 播放器建的空流（`publish.active=false`、`video=null`、`recv_bytes≈0`） | 用 `flex_multi.sh start`（chN → liveN，RTMP 直推），起完**刷新播放页**；见 §7.3 |
+| 旧版 `flex_srs.sh live0/live2/...` 返回 `ALREADY_PUSHING` 或黑屏 | 旧脚本源固定 ch1、全局判断 whip_push、共用 UDP 5004、按全局取 `recv_bytes`，且 `chN` 路径会被回落到 axstream0 | 已修复：新版 `flex_srs.sh liveN` 按流名隔离进程/端口/指标，`axstreamN → liveN` 走 WHIP，支持多路并存；见 §7.3 |
+| `flex_srs.sh start live1` 后 Ctrl+C，再跑 `live1` 反复 `try=N fake-connection (delta_bytes≈1800)`、SRS `video=null` | 旧版把 `start` 当流名、`live1` 当通道号，推出 `stream=start` 的僵尸 whip_push 占着 UDP 5202；Ctrl+C 只杀前台脚本，`setsid` 起的后台进程残留，随后 `live1` 的 whip_push 与僵尸同时 bind 5202（`udpsrc reuse=true`）静默抢包 → `bufs=0` | 已修复：新版把 `start` 识别为子命令、校验流名合法性；启动前 `cleanup_port` 清掉该端口所有僵尸，Ctrl+C 用 trap 清理本次拉起的进程，`stop all` 改为杀掉所有 whip_push；见 §7.1 / §7.3 |
 
 ### 7.1 板上 shell 的两个坑（写脚本必看）
 
 1. **`pkill -f '关键字'` 会杀掉远端 shell 自己**（命令行含同样关键字）→ 改用 `kill <pid>` 或 `pkill -x <进程名>`。
-2. **busybox 下 `grep -o "recv_bytes":[0-9]*` 失效**（未加引号的 `[0-9]*` 触发 glob/解析异常）→ 改用 `tr ',' '\n' | grep recv_bytes | head -1 | tr -dc '0-9'`。
+2. **按流名取 SRS 指标**：BusyBox 无 jq/python，`flex_srs.sh` 用 `grep -oE` 抽出 `"name"` / `"recv_bytes"` / `"publish":{"active"` 再用 awk 配对；旧写法 `tr ',' '\n' | grep recv_bytes | head -1` 只取到全局第一条流，多路时必然误判。
+3. **`udpsrc` 默认 `reuse=true`**：两个 `whip_push` 能同时 bind 同一 UDP 端口且不报错，RTP 包被静默分走，表现为「HTTP 201 + `connection established` 但 `bufs=0`、`recv_bytes` 不涨」。所以每路必须独占端口，启动前要按 `udpsrc port=N` 反查并清掉残留进程（`port_owners` / `cleanup_port`），不能只靠 `stream=liveN` 过滤。
 
 ### 7.2 板子重启后的启动顺序（每次上电必须执行）
 
@@ -322,24 +324,42 @@ insmod /soc/ko/ax_vsync_ctrl.ko
 
 > 部分板子还需把引脚复用成 PWM35：`ax_lookat 0x425083c -s 0x20003`。当前这块板不需要。
 
-### 7.3 多路摄像头（live0 ~ live4）
+### 7.3 多路摄像头（live0 ~ live4）—— WHIP/WebRTC 一一对应
 
-5 路 RTSP 通道是 `rtsp://127.0.0.1:8554/ch0` ~ `ch4`（均为 H.264 2592×1944@30fps，支持并发客户端）。
-多路推流用 `flex_multi.sh start`，由 `rtmp_bridge.sh` 守护，每路一条独立 RTMP/TCP 连接，
-SRS 的 `rtmp_to_rtc on` 让 WHEP 与 HTTP-FLV 播放页都能拉到：
+板端 5 路 RTSP 通道是 `rtsp://127.0.0.1:8554/axstream0` ~ `axstream4`
+（H.264 2592×1944@30fps，支持并发客户端）。**写 `chN` 会被服务端回落到 `axstream0`（通道 0）**，
+服务端日志会显示 `DESCRIBE axstream0 ... playing channel 0`。
 
-| 摄像头 | ch0 | ch1 | ch2 | ch3 | ch4 |
+`flex_srs.sh liveN` 的 N 同时是通道号与流名，全程 WHIP/WebRTC，不经 RTMP：
+
+| 摄像头 | 0 | 1 | 2 | 3 | 4 |
 |---|---|---|---|---|---|
+| RTSP 源 | axstream0 | axstream1 | axstream2 | axstream3 | axstream4 |
 | 流名 | live0 | live1 | live2 | live3 | live4 |
-| 推法 | RTMP | WHIP（`flex_srs.sh live1`，延迟最低） | RTMP | RTMP | RTMP |
+| UDP 端口 | 5200 | 5202 | 5204 | 5206 | 5208 |
 
-上电顺序：`flex_start.sh`（等 `RTSP_READY`）→ `flex_srs.sh live1` → `flex_multi.sh start`。
-`flex_multi.sh stop / status / start 3` 可停全部、查状态、单路补起。
+```sh
+flex_start.sh                      # 等 RTSP_READY
+flex_srs.sh live1                  # 摄像头 1 -> live1
+flex_srs.sh start live2            # 等价写法；start 是子命令不是流名
+flex_srs.sh live4                  # 其它路，可并存
+flex_srs.sh status                 # 映射 / VENC 帧率 / 进程 / SRS 流
+flex_srs.sh stop [liveN|all]       # 停一路或全部
+```
 
-> 不用多个 `whip_push`：它把 `rtph264pay` 的 SSRC 硬编码成 `1111111`，多实例同时 WHIP 会出现
-> `publish.active=true` 但 `recv_bytes≈0` 的假连接；RTMP 天然规避，也不需要 UDP 端口规划。
-> 5 路合计约 10Mbps 上行，卡顿就把 ini 的 `[Encode] u32Bitrate` 降到 800~1000 并重启 `flex_vision`。
-> **推流起来后要刷新播放页**：旧 WHEP 会话是在没有 publisher 时建立的，SRS 不补流。
+- 每路独立 RTP 桥、UDP 端口、日志；`whip_pids` / `get_recv` / `publish_state` 都按流名隔离，
+  不会互相打断；重复执行同一路返回 `ALREADY_PUSHING`。
+- **端口独占**：启动前 `cleanup_port` 按 `udpsrc port=N` 清掉该端口上的所有 whip_push
+  （含异常流名 / Ctrl+C 残留），Ctrl+C 用 trap 清理本次拉起的进程，`stop all` 杀全部 whip_push。
+  两个 udpsrc 抢同一端口会静默 `bufs=0`，是「连接成功却无画面」的常见原因。
+- 启动前检查 `/proc/ax_proc/venc` 的 OutFps，无帧通道报 `SOURCE_NO_FRAMES` 并列出可用通道。
+- 2026-11-12 实测 live1/2/4 **三路 WHIP 并发稳定**，每路 12s 约 3.9MB（≈2.6Mbps）。
+  `whip_push` 把 `rtph264pay` SSRC 硬编码成 `1111111` **并不妨碍多实例**（每个 WHIP 会话是
+  独立 PeerConnection）；早期多路假连接的根因是旧脚本的全局进程判断、共用 UDP 5004、
+  按全局取 `recv_bytes`，以及失效的 `chN` 源路径。
+- `flex_multi.sh` / `rtmp_bridge.sh` 的 RTMP 方案保留为备选，本项目主链路不用。
+- 5 路合计约 10Mbps 上行，卡顿就把 ini 的 `[Encode] u32Bitrate` 降到 800~1000 并重启 `flex_vision`。
+- **推流起来后要刷新播放页**：旧 WHEP 会话是在没有 publisher 时建立的，SRS 不补流。
 
 ---
 

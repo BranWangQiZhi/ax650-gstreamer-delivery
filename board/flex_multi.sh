@@ -2,12 +2,11 @@
 # ============================================================
 # flex_multi.sh - 多路摄像头 -> 多个 SRS 流（RTMP 直推）
 # ============================================================
-# 背景: flex_srs.sh 的参数是「SRS 流名」，不是摄像头通道，源固定 ch1；
-#       且只要检测到任意 whip_push 在跑就返回 ALREADY_PUSHING 直接退出。
-#       所以 `flex_srs.sh live0/live2/...` 根本不会创建新流，播放页必然黑屏
-#       （SRS 上只有 WHEP 播放器建的空流: publish.active=false, video=null）。
+# 背景: 旧版 flex_srs.sh 源固定 ch1、全局判断 whip_push，无法多路；
+#       新版已改为 liveN -> axstreamN 的 WHIP 一一映射并支持并发。
+#       本脚本作为 RTMP 备选保留（主链路走 WebRTC 时可不用）。
 #
-# 映射: rtsp://127.0.0.1:8554/chN -> rtmp://121.40.107.62:1935/live/liveN
+# 映射: rtsp://127.0.0.1:8554/axstreamN -> rtmp://121.40.107.62:1935/live/liveN
 #   ch0 -> live0, ch1 -> live1, ch2 -> live2, ch3 -> live3, ch4 -> live4
 # 每路由 rtmp_bridge.sh 守护（断线自动重连），互不干扰。
 # live1 默认由 flex_srs.sh 用 WHIP 推（低延迟），本脚本默认只补 0/2/3/4；
@@ -45,7 +44,7 @@ pub_running() {  # $1=通道号；用 [x] 技巧避免 grep 匹配自身 / 远�
 start_one() {
   n=$1
   stream=live$n
-  src="rtsp://127.0.0.1:8554/ch$n"
+  src="rtsp://127.0.0.1:8554/axstream$n"
   dst="$RTMP_BASE$stream"
   log=/tmp/rtmp_ch$n.log
 

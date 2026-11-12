@@ -1,0 +1,94 @@
+#!/bin/sh
+# ============================================================
+# S99zflex_start — 开机自动拉起 flex_vision (RTSP 8554)
+# 部署路径: /etc/init.d/S99zflex_start   (权限 755)
+# ============================================================
+# 本板是 Buildroot 2022.02 + BusyBox init，没有 systemd / systemctl。
+# /etc/inittab 的 ::sysinit:/etc/init.d/rcS 会按文件名字典序执行
+# /etc/init.d/S??*，所以"S99z"前缀保证排在 S50vsync(PWM 前置)、
+# /soc/scripts/auto_load_all_drv.sh(驱动)、S99sdio_wifi(网卡)之后。
+#
+# 管理:
+#   /etc/init.d/S99zflex_start start|stop|restart|status
+#   日志: /opt/data/AXSyslog/flex_start.boot.log
+#   禁用开机自启: 删除本文件或 chmod -x；项目内 S50vsync 需单独处理
+# ============================================================
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin:/soc/scripts
+export PATH
+
+STARTER=/usr/local/bin/flex_start.sh
+INI=/opt/etc/cfg_og05b10_5cam_2lan.ini
+LOG=/opt/data/AXSyslog/flex_start.boot.log
+
+flex_pid() {
+	ps -o pid,args 2>/dev/null | grep '[f]lex_vision -p' | awk '{print $1; exit}'
+}
+
+case "$1" in
+start | "")
+	pid=$(flex_pid)
+	if [ -n "$pid" ]; then
+		echo "[flex_start] already running (pid $pid), skip"
+		exit 0
+	fi
+	if [ ! -x "$STARTER" ]; then
+		echo "[flex_start] $STARTER missing or not executable"
+		exit 1
+	fi
+
+	mkdir -p "$(dirname "$LOG")" 2>/dev/null
+	echo "===== $(date) S99zflex_start boot =====" >>"$LOG" 2>/dev/null
+
+	# flex_start.sh 内部会等 8554 就绪最多 30s，放到后台，
+	# 避免阻塞 rcS（BusyBox init 的 sysinit 阶段是同步的）。
+	# setsid 让启动链脱离 rcS 会话，父 shell 退出后不被回收。
+	setsid /bin/sh -c '"$1" "$2" >>"$3" 2>&1' _ \
+		"$STARTER" "$INI" "$LOG" </dev/null >/dev/null 2>&1 &
+	echo "[flex_start] launched in background, log: $LOG"
+	exit 0
+	;;
+
+stop)
+	pid=$(flex_pid)
+	if [ -z "$pid" ]; then
+		echo "[flex_start] not running"
+		exit 0
+	fi
+	kill "$pid" 2>/dev/null
+	i=0
+	while [ "$i" -lt 5 ] && kill -0 "$pid" 2>/dev/null; do
+		sleep 1
+		i=$((i + 1))
+	done
+	if kill -0 "$pid" 2>/dev/null; then
+		kill -9 "$pid" 2>/dev/null
+		echo "[flex_start] killed -9 (pid $pid)"
+	else
+		echo "[flex_start] stopped (pid $pid)"
+	fi
+	exit 0
+	;;
+
+restart)
+	"$0" stop
+	sleep 1
+	"$0" start
+	;;
+
+status)
+	pid=$(flex_pid)
+	if [ -z "$pid" ]; then
+		echo "[flex_start] stopped"
+		exit 1
+	fi
+	echo "[flex_start] running (pid $pid)"
+	netstat -lnt 2>/dev/null | grep ':8554' || echo "[flex_start] 8554 not listening yet"
+	exit 0
+	;;
+
+*)
+	echo "Usage: $0 {start|stop|restart|status}"
+	exit 2
+	;;
+esac

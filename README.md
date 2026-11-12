@@ -98,6 +98,40 @@ timeout 6 curl -s http://127.0.0.1:8080/live/live1.flv | wc -c   # >0 才出流
 
 ---
 
+## 多路摄像头（live0 ~ live4）
+
+⚠️ **`flex_srs.sh` 的参数是 SRS 流名，不是摄像头通道**，视频源固定 `ch1`；而且只要检测到
+已有 `whip_push` 在推，它就返回 `ALREADY_PUSHING` 直接退出。所以执行
+`flex_srs.sh live0 / live2 / live3 / live4` **不会创建新流**，播放页会出现
+「信令已应答 / ICE connected / 连接 connected」却黑屏——SRS 上那几个流只有播放器建的空对象
+（`publish.active=false`、`video=null`、`recv_bytes≈0`）。
+
+板端 5 路 RTSP 通道是 `rtsp://127.0.0.1:8554/ch0` ~ `ch4`（都是 H.264 2592×1944@30fps）。
+多路用 `flex_multi.sh` 启，走 **RTMP 直推**（`rtmp_bridge.sh` 守护，每路一条独立 TCP 连接；
+SRS 配了 `rtmp_to_rtc on`，WHEP / HTTP-FLV 播放页都能拉）：
+
+```sh
+flex_start.sh                 # 1) 等 RTSP_READY
+flex_srs.sh live1             # 2) ch1 -> live1（WHIP，低延迟，保持原样）
+flex_multi.sh start           # 3) ch0/2/3/4 -> live0/2/3/4（RTMP）
+flex_multi.sh status          #    查每路进程与 SRS 流状态
+flex_multi.sh stop            #    停掉这 4 路（不动 live1）
+flex_multi.sh start 3         #    只起/补一路 ch3 -> live3
+```
+
+| 摄像头 | 流名 | 播放地址（`N` 换 0~4） |
+|---|---|---|
+| ch0 | live0 | `http://121.40.107.62:8080/players/webrtc_live.html?stream=liveN` |
+| ch1 | live1 | 同上（WHIP 推，延迟最低） |
+| ch2 / ch3 / ch4 | live2 / live3 / live4 | 同上；FLV 备选 `flv_live.html?stream=liveN` |
+
+> 为什么不用多个 `whip_push`：`whip_push` 把 `rtph264pay` 的 SSRC 硬编码成 `1111111`，
+> 多实例同时 WHIP 会出现 `publish.active=true` 但 `recv_bytes≈0` 的假连接；RTMP 没有这个问题。
+> 5 路合计约 10Mbps 上行，若卡顿把 ini 的 `[Encode] u32Bitrate` 降到 800~1000 并重启 `flex_vision`。
+> **推流起来后要刷新播放页**：旧 WHEP 会话是在没有 publisher 时建立的，SRS 不会给它补流。
+
+---
+
 ## 目录结构
 
 ```
@@ -131,6 +165,8 @@ gstreamer_delivery/
 | `S98imu` | `/etc/init.d/` | ★ 开机装载 ICM-45686 IMU 驱动（insmod + 探测 /dev/ax_imu + DRDY 中断检查，支持 start/stop/restart） |
 | `flex_srs.sh` | `/usr/local/bin/` | ★ 生产：WHIP 直推阿里云，内置源检查 / 会话回收等待 / 桥守护 / 假连接检测；`flex_srs.sh test` 彩条自测（排查是环境问题还是码流问题） |
 | `rtp_bridge.sh` | `/usr/local/bin/` | ★ RTP 桥守护：ffmpeg RTSP→UDP:5004，断开自动重连（不要直接裸跑 ffmpeg） |
+| `rtmp_bridge.sh` | `/usr/local/bin/` | ★ RTMP 桥守护：ffmpeg 把 `chN` 原样封 FLV 直推 SRS 1935，断线自动重连（多路用） |
+| `flex_multi.sh` | `/usr/local/bin/` | ★ 多路管理：`chN → liveN`，`start / stop / status`；默认补 ch0/2/3/4，live1 仍由 `flex_srs.sh` 推 |
 | `gst_install.sh` | 不部署，在线下载执行 | ★ 板端一条命令装齐：GStreamer 运行时 + 业务脚本（自动生成 `/etc/profile.d/gstreamer.sh`） |
 
 ### server/ 文件对照
@@ -164,6 +200,19 @@ flex_srs.sh live1
 
 ---
 
+## 新板首次部署检查（2026-11-12，192.168.137.103 实测）
+
+新板出厂镜像与旧板不同，装完 GStreamer 后还要确认这 4 件事，否则 `flex_start.sh` 起不来、推流链路断在中途：
+
+1. `/opt/etc/cfg_og05b10_5cam_2lan.ini` 的 `[sensor0] sdrSensorTuningBinName` 必须是 `null.bin`。新板 `/opt/etc` 没有 `AX650-OG05B10-auto.bin`，指向它会导致 `com_cfg_loadIni failed, ret=0x80000005` → `FLEX_VISION_EXITED`。仓库 `config/` 里的 ini 已修正。
+2. 板端要有 `/etc/profile.d/gstreamer.sh`（`gst_install.sh` 会生成，手工装的要补写 PATH / LD_LIBRARY_PATH / LD_PRELOAD / GST_*）。
+3. 单独安装的 FFmpeg 7.1 动态库若报 `version GLIBC_2.33 not found`，用 `gstreamer_module/apps/patch_glibc_ver.py` 给 `/usr/local/lib/libavformat.so.61.*`、`libavutil.so.59.*` 打降级补丁，并保持 `LD_PRELOAD=libglibc230_compat.so`。
+4. 阿里云服务器重启后 SRS 不会自己起（1985 拒绝连接）；执行 `sh /usr/local/bin/srs_restart.sh`，现已加 `srs.service` 开机自启。
+
+顺序不变：`flex_start.sh`（看到 `RTSP_READY`）→ `flex_srs.sh live1`（看到 `PUSH_OK`）。
+
+---
+
 ## 已修复记录（2026-11-11）
 
 1. **部署包内 `whip_push` 与源码不同步**（旧包内二进制 md5 `bcd670d8…`）。已在阿里云编译机
@@ -181,7 +230,29 @@ flex_srs.sh live1
    日志出现 `[whip] offer ssrc=…`、`[whip] fixed rtph264pay ssrc=1111111`、
    `connection established`，131 字节残缺 answer 问题消失。
 
-> ⚠️ 待办：GitHub Release 1.0.0 的 `gstreamer-aarch64-deploy.tar.gz` 与 `sha256` 仍是旧资产，
-> 需重新上传，否则从 Release 下载会拿到旧二进制；仓库内已入库的包是最新修复版。
-> 另：板子 14:00 前后曾多次自行重启（dmesg 无 panic/OOM，疑看门狗或供电），本轮 24 分钟内
-> 未再复现，长期稳定性仍需从串口/电源侧确认。
+4. **一键自动安装 + 运行复验通过（15:29–15:32）**。停流后重跑 `bash tools/board_deploy.sh`
+   （下发 → 离线安装 → 自检），再 `flex_srs.sh live1`，首轮 `PUSH_OK try=0 recv_delta_MB=3`；
+   whip 日志 `[whip] offer ssrc=1111111`、`got answer (HTTP 201), 578 bytes`、
+   `connection established, opening valve`（旧版是 131 字节无 m-line answer）。
+   SRS `recv_30s≈2083 kbps` 稳定、18 秒 +3.9MB；HTTP-FLV 6 秒 1.48MB、h264 2592×1944，播放页 200。
+
+> ⚠️ **待办：Release 资产仍未更新（板端在线安装不可用）**。
+> 1.0.2（Latest）与 1.0.1 的 `assets` **都是空的**；页面那两个 `Source code` 是
+> GitHub 自动生成的**整仓库快照**，安装脚本不会去解它找里面的部署包。只有 1.0.0 挂了
+> `gstreamer-aarch64-deploy.tar.gz` + `sha256`，且是旧二进制。
+> 实测 `releases/latest/download/gstreamer-aarch64-deploy.tar.gz` → 302 到 1.0.2 → **404**。
+>
+> **包本身没问题**：修复版 tar.gz 已提交进源码树（1.0.2 tag 与 main 都有），
+> `git hash-object` = `f064ebd…` 与 GitHub Contents API 的 blob sha 完全一致，
+> 即与仓库内 `gstreamer_module/gstreamer-aarch64-deploy.tar.gz`（md5 `70abfc8b…`）字节级相同。
+>
+> 为此 `tools/board_deploy.sh` 已加源码树兜底（Contents API → git blobs API → blob sha 校验）
+> 及 `GST_PKG_URL` / `GST_REF` 逃生口。但本机实测 GitHub 16MB 大文件被代理截断
+> （45 秒仅 1.3MB，raw 与 api blob 皆然），该兜底在国内网络不保证成功。
+> **最稳的两条**：① 直接用仓库内本地包（当前默认路径）；② 把同一个文件上传为 1.0.2 的
+> Release asset（附 `sha256: 4a7b6c8e39cf87a6b0d3be314b892c4b8cf176658f04d1d408bd4da66a1fe9ab`），
+> 之后板端在线 `curl … | sh` 安装才会通。
+>
+> 另：板子 15:37 左右再次自重启（uptime 归零、tmpfs 清空、推流进程全无），已重新执行
+> `flex_start.sh` + `flex_srs.sh live1`，首轮假连接后 `PUSH_OK try=1` 恢复出流。
+> dmesg 无 panic/OOM，重启根因仍需从串口/电源侧确认。

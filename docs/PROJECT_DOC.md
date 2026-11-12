@@ -290,6 +290,11 @@ ffmpeg -v error -i /tmp/c.flv -frames:v 1 -y /tmp/f.jpg
 | 浏览器 WebRTC 黑屏，FLV 正常 | UDP 8000 路径问题或 WHEP 未协商 | 用 `webrtc_live.html` 看诊断面板定位；临时用 FLV 页 |
 | RTSP 拉流 0 buffer 死锁 | `rtspsrc` 与 flex RTP 序号不兼容 | 必须走 ffmpeg RTP 桥 |
 | 板上 `LD_PRELOAD` 报找不到 glibc 符号 | 未加载兼容层（非交互 SSH 不读 profile） | `. /etc/profile.d/gstreamer.sh` |
+| **新板** `flex_start.sh` 打印 `FLEX_VISION_EXITED`，日志 `[sensor0] SDR tuning bin not found: /opt/etc/AX650-OG05B10-auto.bin` | 出厂 `/opt/etc` 没有这个 tuning bin，而 ini 的 `[sensor0]` 仍指向它（sensor1~4 已是 `null.bin`）；`com_cfg_loadIni` 直接返回 `0x80000005` | 把 `[sensor0] sdrSensorTuningBinName` 改成 `null.bin`（官方 sample `og05b10_single_sdr_offline_2lane_entry.ini` 也是 null.bin）。仓库 `config/cfg_og05b10_5cam_2lan.ini` 已修正 |
+| **新板** `ffmpeg/ffprobe` 报 `version 'GLIBC_2.33' not found` | SDK 工具链 sysroot 是 glibc 2.33，单独安装的 FFmpeg 7.1 动态库没打降级补丁（GStreamer 部署包出厂已打过） | 用 `gstreamer_module/apps/patch_glibc_ver.py` 处理 `/usr/local/lib/libavformat.so.61.*`、`libavutil.so.59.*`，并保持 `LD_PRELOAD=/usr/local/lib/libglibc230_compat.so` 提供 `stat64/fstat64/lstat64` |
+| **新板** `gst-inspect-1.0: not found`、手工跑 `rtp_bridge.sh` 失败 | 板端缺 `/etc/profile.d/gstreamer.sh`（该文件由 `gst_install.sh` 生成，手工装的 GStreamer 没有） | 补写 PATH/LD_LIBRARY_PATH/LD_PRELOAD/GST_* 环境变量文件；`flex_srs.sh` 自带兜底，但从它启动的 `rtp_bridge.sh` 会继承 |
+| 板子能起相机但 SRS API `Connection refused`、服务器 `streams:[]` | 阿里云服务器重启后 SRS 没有开机自启 | 服务器上 `sh /usr/local/bin/srs_restart.sh`；已加 `srs.service` 开机自启 |
+| `flex_srs.sh live0/live2/...` 全部返回 `ALREADY_PUSHING`，播放页信令/ICE/连接全绿却黑屏 | 参数是**流名不是摄像头通道**，源固定 ch1；且检测到已有 whip_push 就直接退出，根本没建新流。SRS 上只有 WHEP 播放器建的空流（`publish.active=false`、`video=null`、`recv_bytes≈0`） | 用 `flex_multi.sh start`（chN → liveN，RTMP 直推），起完**刷新播放页**；见 §7.3 |
 
 ### 7.1 板上 shell 的两个坑（写脚本必看）
 
@@ -316,6 +321,25 @@ insmod /soc/ko/ax_vsync_ctrl.ko
 `flex_start.sh` 做的事：前置寄存器 → insmod → 带 `LD_LIBRARY_PATH=...:/soc/lib` 启动 flex_vision（**非交互 SSH 不读 `/etc/profile`，缺 `libax_sys.so` 会直接报错退出**）→ 轮询 8554 就绪，失败时打印日志里的 ERROR 行。
 
 > 部分板子还需把引脚复用成 PWM35：`ax_lookat 0x425083c -s 0x20003`。当前这块板不需要。
+
+### 7.3 多路摄像头（live0 ~ live4）
+
+5 路 RTSP 通道是 `rtsp://127.0.0.1:8554/ch0` ~ `ch4`（均为 H.264 2592×1944@30fps，支持并发客户端）。
+多路推流用 `flex_multi.sh start`，由 `rtmp_bridge.sh` 守护，每路一条独立 RTMP/TCP 连接，
+SRS 的 `rtmp_to_rtc on` 让 WHEP 与 HTTP-FLV 播放页都能拉到：
+
+| 摄像头 | ch0 | ch1 | ch2 | ch3 | ch4 |
+|---|---|---|---|---|---|
+| 流名 | live0 | live1 | live2 | live3 | live4 |
+| 推法 | RTMP | WHIP（`flex_srs.sh live1`，延迟最低） | RTMP | RTMP | RTMP |
+
+上电顺序：`flex_start.sh`（等 `RTSP_READY`）→ `flex_srs.sh live1` → `flex_multi.sh start`。
+`flex_multi.sh stop / status / start 3` 可停全部、查状态、单路补起。
+
+> 不用多个 `whip_push`：它把 `rtph264pay` 的 SSRC 硬编码成 `1111111`，多实例同时 WHIP 会出现
+> `publish.active=true` 但 `recv_bytes≈0` 的假连接；RTMP 天然规避，也不需要 UDP 端口规划。
+> 5 路合计约 10Mbps 上行，卡顿就把 ini 的 `[Encode] u32Bitrate` 降到 800~1000 并重启 `flex_vision`。
+> **推流起来后要刷新播放页**：旧 WHEP 会话是在没有 publisher 时建立的，SRS 不补流。
 
 ---
 

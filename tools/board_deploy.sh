@@ -13,8 +13,15 @@
 #   bash tools/board_deploy.sh -r test               # 装完再跑彩条自测推流
 #   bash tools/board_deploy.sh -r live1              # 装完直接推正式流
 #   bash tools/board_deploy.sh -s                    # 装完只做环境自检
+#   GST_PKG_URL=<直链> bash tools/board_deploy.sh    # GitHub 下载不动时指定可达镜像
+#   GST_REF=1.0.2 bash tools/board_deploy.sh         # 源码树取包时指定 tag/分支
 #
-# 说明:
+# 部署包来源优先级:
+#   1) 仓库内 gstreamer_module/gstreamer-aarch64-deploy.tar.gz（最稳，编译机产出后入库）
+#   2) Release asset（releases/latest/download/...，必须发布时把 tar.gz 挂为 asset）
+#   3) 仓库源码树（Contents API -> git blobs API；只提交进源码树、没挂 asset 时兜底）
+#   注意: 1.0.1/1.0.2 的 assets 为空，2 会 404；GitHub 16MB 大文件在国内常被代理截断，
+#         3 不保证成功，失败时用 GST_PKG_URL 指向内网镜像/对象存储。
 #   - 不在本仓库目录下执行时，会自动 git clone 到临时目录（需要 PC 能上 GitHub）
 #   - 板上落点默认 /tmp/delivery，装完不会自动删除（方便回滚/复查）
 #   - Windows 上用 Git Bash 执行
@@ -64,27 +71,62 @@ fi
 
 PKG=$REPO/gstreamer_module/gstreamer-aarch64-deploy.tar.gz
 if [ ! -f "$PKG" ]; then
-  # 仓库 .gitignore 排除了二进制部署包（编译机本地才有），clone/zip 下载后需从 Release 补
+  # 优先 Release asset；若发布时只把 tar.gz 提交进源码树（没挂 asset，latest/download 会 404），
+  # 则回退到 GitHub 源码树取包：Contents API 拿 blob sha -> git blobs API 取 base64（绕过 1MB 限制）
   ASSET_URL="${GST_MIRROR:-}https://github.com/BranWangQiZhi/ax650-gstreamer-delivery/releases/latest/download/gstreamer-aarch64-deploy.tar.gz"
-  say "仓库内无部署包（.gitignore 不入库），从 Release 下载..."
+  # 逃生口: GitHub 大文件常被代理截断时, 可指定任意可达直链（内网镜像/对象存储/编译机 HTTP）
+  [ -n "${GST_PKG_URL:-}" ] && ASSET_URL="$GST_PKG_URL"
+  say "仓库内无部署包（.gitignore 不入库），尝试 Release asset..."
   say "地址      : $ASSET_URL"
   mkdir -p "$(dirname "$PKG")"
-  curl -fL --connect-timeout 10 --retry 3 -o "$PKG" "$ASSET_URL" \
-    || die "部署包下载失败: $ASSET_URL
-  排查: PC 能访问 GitHub 吗？被墙时加镜像重跑: GST_MIRROR=https://ghproxy.net/ bash tools/board_deploy.sh"
-  # 校验: 连接中断会留下截断的包, 必须对照 Release 的 sha256
-  SHA_URL="${GST_MIRROR:-}https://github.com/BranWangQiZhi/ax650-gstreamer-delivery/releases/latest/download/sha256"
-  SHA_TMP=/tmp/ax650-deploy.sha256
-  if curl -fsL --connect-timeout 10 --retry 3 -o "$SHA_TMP" "$SHA_URL"; then
-    WANT=$(awk '{print $1}' "$SHA_TMP")
-    GOT=$(sha256sum "$PKG" | awk '{print $1}')
-    if [ "$GOT" != "$WANT" ]; then
-      rm -f "$PKG"
-      die "部署包校验失败（下载不完整或被替换）期望 $WANT 实际 $GOT，已删除坏包，请重跑"
-    fi
-    say "校验      : $GOT"
+  FROM_RELEASE=0
+  if curl -fsSL --connect-timeout 8 --max-time 45 --retry 1 -o "$PKG" "$ASSET_URL"; then
+    FROM_RELEASE=1
   else
-    say "警告      : 取不到 Release sha256，跳过校验"
+    rm -f "$PKG"
+    PYBIN=$(command -v python3 || command -v python || command -v py)
+    [ -n "$PYBIN" ] || die "源码树取包需要 python3/python（PC 上未找到）"
+    say "Release asset 不可用（未上传资产时 404），改从仓库源码树取包 (ref=${GST_REF:-main})..."
+    $PYBIN - "$PKG" "${GST_REF:-main}" <<'PY' || die "源码树取包失败（GitHub 16MB 大文件常被代理截断）
+  可改用可达镜像重跑: GST_PKG_URL=<部署包直链> bash tools/board_deploy.sh
+  或手工把编译机的部署包放到: $PKG"
+import sys, json, base64, hashlib, urllib.request
+dest, ref = sys.argv[1], sys.argv[2]
+base = 'https://api.github.com/repos/BranWangQiZhi/ax650-gstreamer-delivery'
+path = 'gstreamer_module/gstreamer-aarch64-deploy.tar.gz'
+def get(url):
+    req = urllib.request.Request(url, headers={
+        'User-Agent': 'ax650-board-deploy', 'Accept': 'application/vnd.github+json'})
+    with urllib.request.urlopen(req, timeout=45) as r:
+        return json.load(r)
+meta = get('%s/contents/%s?ref=%s' % (base, path, ref))
+sha, size = meta['sha'], meta['size']
+blob = get('%s/git/blobs/%s' % (base, sha))
+data = base64.b64decode(blob['content'])
+got = hashlib.sha1(b'blob %d\0' % len(data) + data).hexdigest()
+if got != sha or len(data) != size:
+    raise SystemExit('blob 校验失败: sha %s vs %s, size %d vs %d' % (got, sha, len(data), size))
+open(dest, 'wb').write(data)
+print('源码树取包: %d bytes, git blob %s (ref=%s)' % (len(data), sha, ref))
+PY
+  fi
+  # 校验: 连接中断会留下截断的包。Release 来源对照 sha256；源码树来源已用 git blob sha 逐字节校验
+  if [ "$FROM_RELEASE" = "1" ]; then
+    SHA_URL="${GST_MIRROR:-}https://github.com/BranWangQiZhi/ax650-gstreamer-delivery/releases/latest/download/sha256"
+    SHA_TMP=/tmp/ax650-deploy.sha256
+    if curl -fsL --connect-timeout 10 --retry 3 -o "$SHA_TMP" "$SHA_URL"; then
+      WANT=$(awk '{print $1}' "$SHA_TMP")
+      GOT=$(sha256sum "$PKG" | awk '{print $1}')
+      if [ "$GOT" != "$WANT" ]; then
+        rm -f "$PKG"
+        die "部署包校验失败（下载不完整或被替换）期望 $WANT 实际 $GOT，已删除坏包，请重跑"
+      fi
+      say "校验      : $GOT"
+    else
+      say "警告      : 取不到 Release sha256，跳过校验"
+    fi
+  else
+    say "校验      : 源码树 git blob sha 已逐字节校验"
   fi
 fi
 SZ_KB=$(du -k "$PKG" | awk '{print $1}')
@@ -129,6 +171,7 @@ case "$RUN" in
     say "  flex_start.sh        # 起相机服务（看到 RTSP_READY）"
     say "  flex_srs.sh          # 推流（默认流名 live1）"
     say "  flex_srs.sh test     # 彩条自测，不依赖摄像头"
+    say "  flex_multi.sh start  # 可选：ch0/2/3/4 多路推到 live0/2/3/4"
     ;;
   self)
     step "环境自检"

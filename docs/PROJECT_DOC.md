@@ -43,7 +43,8 @@
 
 | 链路 | 脚本 | 适用场景 | 代价 |
 |---|---|---|---|
-| WHIP 直推（**默认**） | `board/flex_srs.sh` | 码率 ≤ 2~3Mbps，要最低延迟 | 公网 UDP 丢包敏感 |
+| WHIP 直推（live0~4 默认） | `board/flex_srs.sh` | 码率 ≤ 2~3Mbps，要最低延迟 | 公网 UDP 丢包敏感 |
+| RTMP 直推（live5 默认） | `board/flex_srs.sh live5` | 5 合 1 拼接流；WHIP 转发器在此码流上不发送 RTP | 经 SRS 1935 转一次，WHEP/FLV 播放端不变；`PUSH_MODE=whip` 可切回 |
 
 ---
 
@@ -57,7 +58,7 @@
 | 系统 | AX650 (aarch64)，glibc **2.30** |
 | 摄像头 | OG05B10 5MP 鱼眼，原生 2592×1944 |
 | 采集服务 | flex_vision，启动脚本 `/opt/bin/flex_vision_run.sh`，配置 `/opt/etc/cfg_og05b10_5cam_2lan.ini` |
-| RTSP 端口 | **8554**（不是 554），通道 `axstream0` ~ `axstream4`（`chN` 会被回落到通道 0）；开启 `[multiGrideDisplay] enable=1` 后多一路 5 合 1 拼接流 `axstream5`，见 README「5 合 1 拼接流」 |
+| RTSP 端口 | **8554**（不是 554），通道 `axstream0` ~ `axstream4`（`chN` 会被回落到通道 0）；开启 `[multiGrideDisplay] enable=1` 后多一路 5 合 1 拼接流 `axstream5`（可用 `flex_srs.sh live5` 推到 SRS），见 README「5 合 1 拼接流」 |
 | GStreamer | 1.22.12，装在 `/usr/local`，环境脚本 `/etc/profile.d/gstreamer.sh` |
 
 ### 2.2 阿里云服务器
@@ -324,28 +325,31 @@ insmod /soc/ko/ax_vsync_ctrl.ko
 
 > 部分板子还需把引脚复用成 PWM35：`ax_lookat 0x425083c -s 0x20003`。当前这块板不需要。
 
-### 7.3 多路摄像头（live0 ~ live4）—— WHIP/WebRTC 一一对应
+### 7.3 多路摄像头（live0 ~ live5）—— live0~4 WHIP，live5 RTMP
 
-板端默认 5 路 RTSP 通道是 `rtsp://127.0.0.1:8554/axstream0` ~ `axstream4`
+板端 5 路 RTSP 通道是 `rtsp://127.0.0.1:8554/axstream0` ~ `axstream4`
 （H.264 2592×1944@30fps，支持并发客户端）；开启 `[multiGrideDisplay] enable=1` 后另增
-5 合 1 拼接流 `axstream5`（见 README「5 合 1 拼接流」）。**写 `chN` 会被服务端回落到 `axstream0`（通道 0）**，
+5 合 1 拼接流 `axstream5`（2880×1440，实测 7~13fps，见 README「5 合 1 拼接流」）。
+**写 `chN` 会被服务端回落到 `axstream0`（通道 0）**，
 服务端日志会显示 `DESCRIBE axstream0 ... playing channel 0`。
 
-`flex_srs.sh liveN` 的 N 同时是通道号与流名，全程 WHIP/WebRTC，不经 RTMP：
+`flex_srs.sh liveN` 的 N 同时是通道号与流名；live0~4 走 WHIP/WebRTC，
+live5 拼接画布默认走 RTMP 直推（详见 README「为什么 live5 不走 WHIP」）：
 
-| 摄像头 | 0 | 1 | 2 | 3 | 4 |
-|---|---|---|---|---|---|
-| RTSP 源 | axstream0 | axstream1 | axstream2 | axstream3 | axstream4 |
-| 流名 | live0 | live1 | live2 | live3 | live4 |
-| UDP 端口 | 5200 | 5202 | 5204 | 5206 | 5208 |
+| 通道 | 0 | 1 | 2 | 3 | 4 | 5（拼接画布） |
+|---|---|---|---|---|---|---|
+| RTSP 源 | axstream0 | axstream1 | axstream2 | axstream3 | axstream4 | axstream5 |
+| 流名 | live0 | live1 | live2 | live3 | live4 | live5 |
+| UDP 端口 | 5200 | 5202 | 5204 | 5206 | 5208 | 不用（RTMP 1935） |
 
 ```sh
 flex_start.sh                      # 等 RTSP_READY
 flex_srs.sh live1                  # 摄像头 1 -> live1
 flex_srs.sh start live2            # 等价写法；start 是子命令不是流名
 flex_srs.sh live4                  # 其它路，可并存
+flex_srs.sh live5                  # 5 合 1 拼接画布 -> live5
 flex_srs.sh status                 # 映射 / VENC 帧率 / 进程 / SRS 流
-flex_srs.sh stop [liveN|all]       # 停一路或全部
+flex_srs.sh stop [liveN|all]       # 停一路或全部（含 live5）
 ```
 
 - 每路独立 RTP 桥、UDP 端口、日志；`whip_pids` / `get_recv` / `publish_state` 都按流名隔离，
@@ -359,7 +363,18 @@ flex_srs.sh stop [liveN|all]       # 停一路或全部
   独立 PeerConnection）；早期多路假连接的根因是旧脚本的全局进程判断、共用 UDP 5004、
   按全局取 `recv_bytes`，以及失效的 `chN` 源路径。
 - `flex_multi.sh` / `rtmp_bridge.sh` 的 RTMP 方案保留为备选，本项目主链路不用。
-- 5 路合计约 10Mbps 上行，卡顿就把 ini 的 `[Encode] u32Bitrate` 降到 800~1000 并重启 `flex_vision`。
+- **live5 特殊性（2026-11-13 最终方案）**：WHIP 链路在这条拼接流上会无限
+  `fake-connection`。分层验证：彩条走同一套 WHIP 正常（`recv_delta_KB=3282`）→
+  whip_push / 多实例没问题；RTMP 直推 `axstream5` 正常 → 码流没问题；
+  单会话保持 100s、跨约 15 个 IDR 仍 `frames=0` → 不是关键帧稀疏；
+  服务器抓 live5 的 ICE 5 元组，14s 只有 3 个 66B keepalive、零个视频 RTP 包 →
+  webrtcbin 收到 RTP 却不发。故 ch5 改为 RTMP 直推（SRS `rtmp_to_rtc on`，
+  WHEP / FLV 播放页零改动）。实测 `PUSH_OK mode=rtmp recv_delta_KB=697`、
+  `H264 2880×1440 / recv_30s≈356kbps`、`ALREADY_PUSHING` 幂等、
+  `stop live5` 不误伤 live0。抽帧见 `docs/images/10_srs_live5_rtmp_20261113.jpg`。
+  `PUSH_MODE=whip` 可强制回退旧链路；ch5 的低阈值 / 长窗口调优仍保留给该模式。
+- 6 路全开合计约 10Mbps 上行（live5 只占约 0.5Mbps），卡顿就把 ini 的 `[Encode] u32Bitrate`
+  降到 800~1000 并重启 `flex_vision`。
 - **推流起来后要刷新播放页**：旧 WHEP 会话是在没有 publisher 时建立的，SRS 不补流。
 
 ---

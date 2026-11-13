@@ -119,10 +119,15 @@ show_status() {
   grid_probe
 }
 
-# Active liveN streams (whip_push URL contains stream=liveN).
+# Active liveN streams: WHIP publisher URL contains stream=liveN, while the
+# RTMP publisher (ch5 grid stream) has a command line ending in /live/liveN.
 active_streams() {
-  ps w 2>/dev/null | grep '[w]hip_push' | grep -o 'stream=live[0-4]' \
-    | sed 's/^stream=//' | sort -u
+  {
+    ps w 2>/dev/null | grep '[w]hip_push' | grep -o 'stream=live[0-5]' \
+      | sed 's/^stream=//'
+    ps w 2>/dev/null | grep '[f]fmpeg' | grep 'rtmp://' \
+      | grep -oE 'live/live[0-5]$' | sed 's|^live/||'
+  } | sort -u
 }
 
 restart_flex() {

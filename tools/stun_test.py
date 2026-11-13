@@ -1,6 +1,6 @@
 import socket, struct, os, sys, time
 
-SERVER = ("121.40.107.62", 8000)
+SERVER = ("121.196.101.253", 8000)
 
 def stun_binding():
     # STUN Binding Request: type=0x0001, len=0, magic cookie 0x2112A442, txid

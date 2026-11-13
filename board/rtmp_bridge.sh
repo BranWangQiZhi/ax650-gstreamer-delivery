@@ -20,7 +20,8 @@ export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
   export LD_PRELOAD=/usr/local/lib/libglibc230_compat.so
 
 SRC=${1:-rtsp://127.0.0.1:8554/axstream1}
-DST=${2:-rtmp://121.40.107.62:1935/live/live1}
+SRS_HOST=${SRS_HOST:-121.196.101.253}
+DST=${2:-rtmp://${SRS_HOST}:1935/live/live1}
 LOG=${3:-/tmp/rtmp_bridge.log}
 
 while true; do

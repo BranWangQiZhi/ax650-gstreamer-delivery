@@ -6,7 +6,7 @@
 #       新版已改为 liveN -> axstreamN 的 WHIP 一一映射并支持并发。
 #       本脚本作为 RTMP 备选保留（主链路走 WebRTC 时可不用）。
 #
-# 映射: rtsp://127.0.0.1:8554/axstreamN -> rtmp://121.40.107.62:1935/live/liveN
+# 映射: rtsp://127.0.0.1:8554/axstreamN -> rtmp://121.196.101.253:1935/live/liveN
 #   ch0 -> live0, ch1 -> live1, ch2 -> live2, ch3 -> live3, ch4 -> live4
 # 每路由 rtmp_bridge.sh 守护（断线自动重连），互不干扰。
 # live1 默认由 flex_srs.sh 用 WHIP 推（低延迟），本脚本默认只补 0/2/3/4；
@@ -22,8 +22,9 @@
 #
 # 部署路径: /usr/local/bin/flex_multi.sh（依赖 rtmp_bridge.sh）
 # ============================================================
-SRS_API=http://121.40.107.62:1985/api/v1/streams/
-RTMP_BASE=rtmp://121.40.107.62:1935/live/
+SRS_HOST=${SRS_HOST:-121.196.101.253}
+SRS_API=http://${SRS_HOST}:1985/api/v1/streams/
+RTMP_BASE=rtmp://${SRS_HOST}:1935/live/
 ALL="0 2 3 4"
 CMD=${1:-status}
 shift 2>/dev/null

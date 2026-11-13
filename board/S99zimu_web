@@ -1,0 +1,32 @@
+#!/bin/sh
+# ============================================================================
+# /etc/init.d/S99zimu_web - 开机启动 IMU 采集与上报
+# ----------------------------------------------------------------------------
+# rcS 按文件名字典序执行 /etc/init.d/S??*：
+#   S98imu（装载驱动） -> S99sdio_wifi -> S99zflex_start -> S99zimu_web
+# 排在最后，确保 /dev/ax_imu、网络都就绪。
+#
+# 可选配置 /etc/imu_agent.env（权限 600），例如：
+#   SRS_HOST=121.196.101.253
+#   IMU_HUB_PORT=8090
+#   IMU_TOKEN=xxxxxxxx
+#   IMU_MODE=both
+# ============================================================================
+AGENT=/usr/local/bin/imu_agent.sh
+[ -f /etc/imu_agent.env ] && . /etc/imu_agent.env
+export SRS_HOST IMU_HUB_PORT IMU_TOKEN IMU_MODE IMU_HTTP_PORT
+
+case "$1" in
+start | "")
+  [ -x "$AGENT" ] || { echo "imu_web: missing $AGENT"; exit 1; }
+  "$AGENT" start "${IMU_MODE:-both}"
+  ;;
+stop)    "$AGENT" stop ;;
+restart) "$AGENT" stop; sleep 1; "$AGENT" start "${IMU_MODE:-both}" ;;
+status)  "$AGENT" status ;;
+*)
+  echo "Usage: $0 {start|stop|restart|status}"
+  exit 2
+  ;;
+esac
+exit 0

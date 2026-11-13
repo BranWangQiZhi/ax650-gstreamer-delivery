@@ -31,6 +31,7 @@
   <span>协议：HTTP-FLV (TCP)</span>
   <span class="state" id="state">待播放</span>
   <span class="state" id="stats"></span>
+  <button id="imu-toggle" title="显示/隐藏 IMU 实时数据面板">IMU 数据</button>
 </div>
 <div id="wrap">
   <video id="v" muted playsinline autoplay controls></video>
@@ -107,5 +108,7 @@
   }, 1000);
 })();
 </script>
+<!-- IMU 实时数据浮层（ICM-45686）：数据源可用 ?imu=auto|hub|board|demo|off 切换 -->
+<script src="imu_panel.js"></script>
 </body>
 </html>

@@ -18,12 +18,12 @@
  * 编译: 见 build.sh
  * 用法: ./whip_push <whip_url> "<pipeline 到 rtph264pay 为止>"
  *   1) 本地测试彩条:
- *   ./whip_push http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream=test \
+ *   ./whip_push http://121.196.101.253:1985/rtc/v1/whip/?app=live&stream=test \
  *     "videotestsrc is-live=true ! video/x-raw,width=1280,height=720,framerate=30/1 \
  *      ! videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=2000 key-int-max=30 \
  *      ! rtph264pay config-interval=-1 pt=96"
  *   2) RTSP 转发(flex_vision/任意 RTSP 源, 不转码直通):
- *   ./whip_push http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream=rtsp2 \
+ *   ./whip_push http://121.196.101.253:1985/rtc/v1/whip/?app=live&stream=rtsp2 \
  *     "rtspsrc location=rtsp://127.0.0.1:554/ch0 protocols=tcp latency=100 \
  *      ! rtph264depay ! h264parse ! rtph264pay config-interval=-1 pt=96"
  *

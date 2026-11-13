@@ -8,7 +8,7 @@
 ## 1. 总体架构
 
 ```
-┌────────────── 阿里云编译服务器 ──────────────┐   ┌──── 开发板 ────┐   ┌─── 阿里云 SRS 媒体服务器 (121.40.107.62) ───┐
+┌────────────── 阿里云编译服务器 ──────────────┐   ┌──── 开发板 ────┐   ┌─── 阿里云 SRS 媒体服务器 (121.196.101.253) ───┐
 │ ax650_sdk/third-party/gstreamer              │   │ /usr/local/{   │   │ WHIP/WHEP(HTTP-API)      :1985              │
 │   tarballs/  源码包(19个)                     │   │   bin, lib,    │   │ WebRTC ICE(TCP+UDP)      :8000              │
 │   build.sh   交叉编译 21 步                    │ tar→│  libexec}    │   │ HTTP-FLV / HLS          :8080              │
@@ -119,7 +119,7 @@ GStreamer **1.22 没有 whipsink**（1.24+ 才有，且依赖 libsoup3/nghttp2/s
 flex_srs.sh test
 
 # 完整写法
-whip_push http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream=test \
+whip_push http://121.196.101.253:1985/rtc/v1/whip/?app=live&stream=test \
   "videotestsrc is-live=true pattern=smpte ! video/x-raw,width=1280,height=720,framerate=30/1 \
    ! videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=2000 key-int-max=30 \
    ! rtph264pay config-interval=-1 pt=96"
@@ -130,11 +130,11 @@ whip_push http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream=test \
 
 ### 5.3 拉流验证（浏览器 / ffprobe）
 
-- **浏览器 WebRTC 播放页**：打开 `http://121.40.107.62:8080/players/rtc_player.html?autostart=true&stream=test`
-- **HTTP-FLV**：`ffprobe http://121.40.107.62:8080/live/test.flv`
+- **浏览器 WebRTC 播放页**：打开 `http://121.196.101.253:8080/players/rtc_player.html?autostart=true&stream=test`
+- **HTTP-FLV**：`ffprobe http://121.196.101.253:8080/live/test.flv`
 - **SRS 状态 API**：
   ```bash
-  curl http://121.40.107.62:1985/api/v1/streams/   # publish.active:true, video 1280x720, recv_bytes 增长
+  curl http://121.196.101.253:1985/api/v1/streams/   # publish.active:true, video 1280x720, recv_bytes 增长
   ```
 
 本次验证结果：FLV 拉流 `recv_bytes 2.3MB+`、抽帧彩条图像无花屏。
@@ -146,7 +146,7 @@ whip_push 现已支持**动态 pad 源**（rtspsrc），可以直接把板子上
 
 ```bash
 # 板子上运行（源为 flex_vision 的 RTSP，改为实际地址）
-whip_push http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream=rtsp2 \
+whip_push http://121.196.101.253:1985/rtc/v1/whip/?app=live&stream=rtsp2 \
   "rtspsrc location=rtsp://127.0.0.1:554/ch0 protocols=tcp latency=100 \
    ! rtph264depay ! h264parse ! rtph264pay config-interval=-1 pt=96"
 ```
@@ -188,12 +188,12 @@ select()/poll fd → AX_VENC_GetStream(chn, 100ms) → 拿到 AX_VENC_STREAM_T
 
 ### 5.6 推流到阿里云 SRS（公网）
 
-服务器 `121.40.107.62` 已装 SRS 6.0.195（`/usr/local/srs/srs-server-6.0-r3`，配置
+服务器 `121.196.101.253` 已装 SRS 6.0.195（`/usr/local/srs/srs-server-6.0-r3`，配置
 `conf/whip.conf`），端口：1985 HTTP-API(WHIP/WHEP)、8000 TCP+UDP WebRTC、
 8080 HTTP-FLV、1935 RTMP。
 
 **WHIP 直推**：板上 `/usr/local/bin/flex_srs.sh`
-→ `http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream=live1`。
+→ `http://121.196.101.253:1985/rtc/v1/whip/?app=live&stream=live1`。
 
 **WHIP 直推公网的码率红线（重要实测结论）**：WHIP 走 UDP，公网丢包对大 IDR
 帧致命。8Mbps CBR 下一个 IDR 有数百个 RTP 分片，被打碎后 SRS 的 RTC→RTMP 桥
@@ -206,7 +206,7 @@ IDR 体积缩小约 4 倍，WHIP 直推阿里云完全打通（8s FLV 拉 1.9MB�
 axenc 硬编需 axmm 设备 ctx（与 flex 冲突），板上也没有 /dev/video*。
 
 **WHIP 方式**：板上 `/usr/local/bin/flex_srs.sh`
-→ `http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream=live1`。
+→ `http://121.196.101.253:1985/rtc/v1/whip/?app=live&stream=live1`。
 
 **关键坑（WHIP+SRS）**：SRS 的 SDP 协商要求 offer 的 video m-line 带 `a=ssrc:`
 行（浏览器会带，webrtcbin 不带），否则 SRS 返回**没有 m-line 的残缺 answer**，
@@ -218,10 +218,10 @@ webrtcbin 报 "Answer doesn't have the same number of m-lines as the offer"。
 
 | 方式 | 地址 |
 |---|---|
-| 浏览器 WebRTC 播放页 | `http://121.40.107.62:8080/players/rtc_player.html?autostart=true&stream=live1` |
-| WHEP 拉流信令 | `http://121.40.107.62:1985/rtc/v1/whep/?app=live&stream=live1` |
-| HTTP-FLV（VLC/ffplay） | `http://121.40.107.62:8080/live/live1.flv` |
-| RTMP | `rtmp://121.40.107.62:1935/live/live1` |
+| 浏览器 WebRTC 播放页 | `http://121.196.101.253:8080/players/rtc_player.html?autostart=true&stream=live1` |
+| WHEP 拉流信令 | `http://121.196.101.253:1985/rtc/v1/whep/?app=live&stream=live1` |
+| HTTP-FLV（VLC/ffplay） | `http://121.196.101.253:8080/live/live1.flv` |
+| RTMP | `rtmp://121.196.101.253:1935/live/live1` |
 
 实测（2026-11-10）：
 - WHIP 直推 @8Mbps：信令/DTLS 正常、API 显示 video=Baseline 5.1 2592×1944，
@@ -257,10 +257,10 @@ GST_DEBUG=3 gst-inspect-1.0 webrtcbin
 tail -f /tmp/whip_push.log
 
 # 板子：手动跑（前台，带详细日志）
-GST_DEBUG=3 whip_push http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream=test "flex_srs.sh test 里的 pipeline"
+GST_DEBUG=3 whip_push http://121.196.101.253:1985/rtc/v1/whip/?app=live&stream=test "flex_srs.sh test 里的 pipeline"
 
 # SRS 状态：推流会话与码率
-curl http://121.40.107.62:1985/api/v1/streams/
+curl http://121.196.101.253:1985/api/v1/streams/
 
 # 检查 glibc 版本需求是否还有残留
 objdump -T /usr/local/lib/libglib-2.0.so.0 | grep GLIBC_2.3
@@ -291,7 +291,7 @@ flex_srs.sh [流名]        # flex ch1 推流到阿里云 SRS（默认 live1）
 killall whip_push         # 停止推流
 
 # ===== 观看（浏览器 / 拉流）=====
-# 浏览器: http://121.40.107.62:8080/players/rtc_player.html?autostart=true&stream=live1
-ffplay http://121.40.107.62:8080/live/live1.flv
-curl http://121.40.107.62:1985/api/v1/streams/
+# 浏览器: http://121.196.101.253:8080/players/rtc_player.html?autostart=true&stream=live1
+ffplay http://121.196.101.253:8080/live/live1.flv
+curl http://121.196.101.253:1985/api/v1/streams/
 ```

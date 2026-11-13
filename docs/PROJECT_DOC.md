@@ -23,12 +23,12 @@
 │      │  ffmpeg -c copy -f rtp rtp://127.0.0.1:5004   （必须，见 5.2）                  │
 │      ▼                                                                               │
 │  whip_push (自研 WHIP 客户端, webrtcbin)                                              │
-│      │  WHIP 信令: HTTP POST offer/answer → http://121.40.107.62:1985/rtc/v1/whip/     │
-│      │  媒体:      DTLS-SRTP over UDP → 121.40.107.62:8000                            │
+│      │  WHIP 信令: HTTP POST offer/answer → http://121.196.101.253:1985/rtc/v1/whip/     │
+│      │  媒体:      DTLS-SRTP over UDP → 121.196.101.253:8000                            │
 └──────────────────────────────────────┬───────────────────────────────────────────────┘
                                        │  公网
                                        ▼
-┌──────────────────── 阿里云服务器 121.40.107.62 (SRS 6.0.195) ────────────────────────┐
+┌──────────────────── 阿里云服务器 121.196.101.253 (SRS 6.0.195) ────────────────────────┐
 │  1985  HTTP-API (WHIP 推流 / WHEP 拉流)                                               │
 │  8000  WebRTC 媒体 (UDP+TCP)                                                          │
 │  8080  HTTP-FLV / 播放页 (players/)                                                   │
@@ -64,7 +64,7 @@
 
 | 项 | 值 |
 |---|---|
-| IP  | `121.40.107.62` |
+| IP  | `121.196.101.253` |
 | 流媒体 | SRS 6.0.195，路径 `/usr/local/srs/srs-server-6.0-r3`，配置 `trunk/conf/whip.conf` |
 | 端口 | 1985(API/WHIP/WHEP)、8000(WebRTC 媒体)、8080(HTTP-FLV/播放页)、1935(RTMP) |
 | 安全组 | 需放行 TCP 1985/8080/1935 与 UDP 8000 |
@@ -268,10 +268,10 @@ ffmpeg -v error -i /tmp/c.flv -frames:v 1 -y /tmp/f.jpg
 
 | 方式 | 地址 |
 |---|---|
-| WebRTC（低延迟） | `http://121.40.107.62:8080/players/webrtc_live.html?stream=live1` |
-| HTTP-FLV（稳定） | `http://121.40.107.62:8080/players/flv_live.html?stream=live1` |
-| ffplay / VLC | `http://121.40.107.62:8080/live/live1.flv` |
-| RTMP | `rtmp://121.40.107.62:1935/live/live1` |
+| WebRTC（低延迟） | `http://121.196.101.253:8080/players/webrtc_live.html?stream=live1` |
+| HTTP-FLV（稳定） | `http://121.196.101.253:8080/players/flv_live.html?stream=live1` |
+| ffplay / VLC | `http://121.196.101.253:8080/live/live1.flv` |
+| RTMP | `rtmp://121.196.101.253:1935/live/live1` |
 
 ---
 

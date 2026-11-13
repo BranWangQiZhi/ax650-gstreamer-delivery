@@ -5,7 +5,7 @@
 # 用法: sh deploy_server.sh
 # 前提: 能 ssh root@<服务器IP>
 set -e
-SRV=${SRV:-root@121.40.107.62}
+SRV=${SRV:-root@121.196.101.253}
 PLAYERS=/usr/local/srs/srs-server-6.0-r3/trunk/objs/nginx/html/players
 HERE=$(cd "$(dirname "$0")" && pwd)
 

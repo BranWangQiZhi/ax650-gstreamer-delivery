@@ -9,14 +9,16 @@
 
 ```
 flex_vision axstreamN (2592×1944 @ 2Mbps) → ffmpeg RTP 桥 → whip_push (WHIP/WebRTC)
-  → 阿里云 SRS 121.40.107.62:1985  →  浏览器 WHEP / HTTP-FLV
+  → 阿里云 SRS 121.196.101.253:1985  →  浏览器 WHEP / HTTP-FLV
 ```
 
 **观看地址**
 
-- WebRTC（低延迟，自带诊断面板）：`http://121.40.107.62:8080/players/webrtc_live.html?stream=live1`
-- HTTP-FLV（稳定，约 1s 延迟）：`http://121.40.107.62:8080/players/flv_live.html?stream=live1`
-- 播放器直连：`ffplay http://121.40.107.62:8080/live/live1.flv`
+- WebRTC（低延迟，自带诊断面板）：`http://121.196.101.253:8080/players/webrtc_live.html?stream=live1`
+- HTTP-FLV（稳定，约 1s 延迟）：`http://121.196.101.253:8080/players/flv_live.html?stream=live1`
+- **IMU 叠加显示**（六轴数值 / 波形 / 驱动诊断）：`http://121.196.101.253:8080/players/flv_live.html?stream=live1&imu=auto`
+  （`?imu=demo` 可脱离板子直接看 UI 效果）
+- 播放器直连：`ffplay http://121.196.101.253:8080/live/live1.flv`
 
 ---
 
@@ -96,7 +98,7 @@ tail -f /tmp/srs_whip_live1.log
 > 只有该流 `recv_bytes` 8 秒增量为 0 才重建会话。
 > Ctrl+C 中断时脚本会清理本次拉起的后台进程，不留下占端口的僵尸。
 
-**服务器（121.40.107.62）验证**
+**服务器（121.196.101.253）验证**
 
 ```bash
 curl -s http://127.0.0.1:1985/api/v1/streams/          # active=true 才有流
@@ -105,11 +107,38 @@ timeout 6 curl -s http://127.0.0.1:8080/live/live1.flv | wc -c   # >0 才出流
 
 ---
 
+## IMU 数据显示（ICM-45686）
+
+播放页右下角浮层可显示 **加计/陀螺六轴数值、实时波形、ODR/量程/DRDY 中断等驱动诊断**。
+IMU 数据取自板端驱动，浏览器拿不到，所以多了一条独立链路：
+
+```
+sample_icm45686 → imu_agent.sh → POST :8090 → imu_hub.py → players/imu_latest.json → 页面同源 fetch
+                              └→ 板端 HTTP :8099/cgi-bin/imu → 页面 JSONP（局域网直连）
+```
+
+```bash
+# 服务器（PC 上执行一次，会打印 token）
+cd server && sh deploy_imu.sh
+
+# 板端（先确认 /etc/init.d/S98imu 已装载驱动）
+scp board/imu_agent.sh root@<板IP>:/usr/local/bin/imu_agent.sh
+SRS_HOST=121.196.101.253 IMU_TOKEN=<deploy_imu.sh 打印的 token> imu_agent.sh start both
+imu_agent.sh status
+```
+
+`?imu=auto`（默认）优先同源转发的 JSON、失败自动退到板端直连；也可显式用
+`?imu=hub` / `?imu=board&board=http://<板IP>:8099` / `?imu=demo` / `?imu=off`。
+服务器需放行 TCP 8090（仅板端上报用，浏览器仍只访问 8080）。
+完整说明、数据格式与排障见 **[docs/IMU_WEB_DISPLAY.md](docs/IMU_WEB_DISPLAY.md)**。
+
+---
+
 ## 多路摄像头（live0 ~ live4）—— WHIP/WebRTC 一一对应
 
 `flex_srs.sh liveN` 里的 **N 同时是摄像头通道号与 SRS 流名**，全程走 WHIP/WebRTC，不经 RTMP：
 
-| 摄像头 | RTSP 源 | 流名 | 播放页（`http://121.40.107.62:8080/players/` 下） |
+| 摄像头 | RTSP 源 | 流名 | 播放页（`http://121.196.101.253:8080/players/` 下） |
 |---|---|---|---|
 | 0 | `axstream0` | `live0` | `webrtc_live.html?stream=live0` |
 | 1 | `axstream1` | `live1` | `webrtc_live.html?stream=live1` |
@@ -177,6 +206,8 @@ gstreamer_delivery/
 | `flex_start.sh` | `/usr/local/bin/` | ★ 启动相机服务：PWM 同步前置 + insmod + 等 8554 就绪（重启后必跑） |
 | `S50vsync` | `/etc/init.d/` | ★ 开机自动做 PWM 寄存器写入 + 装载 ax_vsync_ctrl.ko（无需登录，先于相机服务） |
 | `S98imu` | `/etc/init.d/` | ★ 开机装载 ICM-45686 IMU 驱动（insmod + 探测 /dev/ax_imu + DRDY 中断检查，支持 start/stop/restart） |
+| `imu_agent.sh` | `/usr/local/bin/` | IMU 采集：读 `sample_icm45686`，上报服务器 + 本地 HTTP 直连（`start/stop/status/once/sample`） |
+| `S99zimu_web` | `/etc/init.d/` | 可选：开机自启 `imu_agent.sh`（排在 S98imu / S99zflex_start 之后） |
 | `flex_srs.sh` | `/usr/local/bin/` | ★ 生产：`liveN → axstreamN` 一一对应（也支持 `start liveN`），WHIP/WebRTC 直推；支持多路并存 / `stop` / `status` / `test`，内置源帧率检查、端口僵尸清理、中断自清理、会话回收、桥守护、假连接检测 |
 | `rtp_bridge.sh` | `/usr/local/bin/` | ★ RTP 桥守护：ffmpeg RTSP→UDP `5200+2*N`，每路一个、断开自动重连（不要直接裸跑 ffmpeg） |
 | `rtmp_bridge.sh` | `/usr/local/bin/` | RTMP 桥守护（备选）：ffmpeg 把 RTSP 原样封 FLV 直推 SRS 1935；本项目主链路不用 |
@@ -187,10 +218,13 @@ gstreamer_delivery/
 
 | 文件 | 部署到 | 作用 |
 |---|---|---|
-| `flv_live.html` | `players/` | HTTP-FLV 播放页（mpegts.js，走 TCP 最稳） |
+| `flv_live.html` | `players/` | HTTP-FLV 播放页（mpegts.js，走 TCP 最稳），已叠加 IMU 数据面板 |
+| `imu_panel.js` | `players/` | IMU 浮层：六轴数值 + 实时波形 + ODR/量程/中断诊断 + 原始输出 |
+| `imu_hub.py` | `/usr/local/bin/` | 服务器 IMU 中转：收板端 POST、写同源 `imu_latest.json`、SSE/CORS |
 | `webrtc_live.html` | `players/` | WHEP 播放页，顶栏显示 信令/ICE/连接/分辨率/丢包 |
 | `srs_restart.sh` | `/usr/local/bin/` | 重启 SRS（改配置后用） |
 | `deploy_server.sh` | PC 上执行 | 一键下发播放页并校验 HTTP |
+| `deploy_imu.sh` | PC 上执行 | 一键下发 IMU 页面 + hub，生成 token、注册 systemd、校验 HTTP |
 
 ---
 

@@ -22,8 +22,12 @@
 # 部署路径: /usr/local/bin/flex_srs.sh
 # ============================================================================
 
-API="http://121.40.107.62:1985/api/v1/streams/"
-WHIP="http://121.40.107.62:1985/rtc/v1/whip/?app=live&stream="
+# 服务器地址可用环境变量覆盖，换服务器时无需改脚本：
+#   SRS_HOST=192.168.1.9 flex_srs.sh live1
+SRS_HOST=${SRS_HOST:-121.196.101.253}
+SRS_API_PORT=${SRS_API_PORT:-1985}
+API="http://${SRS_HOST}:${SRS_API_PORT}/api/v1/streams/"
+WHIP="http://${SRS_HOST}:${SRS_API_PORT}/rtc/v1/whip/?app=live&stream="
 
 # 运行环境: 优先 source profile.d；再兜底自设(非登录 shell / profile 未生成也能跑)
 [ -f /etc/profile.d/gstreamer.sh ] && . /etc/profile.d/gstreamer.sh
@@ -58,8 +62,10 @@ wait_release() {  # 旧 whip_push 被杀后 SRS 约需 40s 回收会话
   n=0
   while [ $n -lt 60 ]; do
     [ "$(publish_state)" != "true" ] && return 0
-    sleep 1
     n=$((n+1))
+    # 每 5 秒报一次进度：否则前台看起来像卡死，用户容易 Ctrl+C，反而留下新僵尸
+    [ $((n % 5)) -eq 0 ] && echo "  ... 等待 SRS 回收旧会话 ${n}s/60s"
+    sleep 1
   done
   return 1
 }
@@ -249,6 +255,15 @@ if [ -n "$(whip_pids "$STREAM")" ]; then
   echo "whip_push 在跑但本流无码流 (8s 增量=$DELTA8)，重建会话"
   for p in $(whip_pids "$STREAM"); do kill "$p" 2>/dev/null; done
   wait_whip_gone "$STREAM"
+  wait_release || echo "WARN: SRS 60s 内未释放会话，仍继续尝试"
+fi
+
+# ---------- 冷启动前: 先确认 SRS 上没有残留的 publish 会话 ----------
+# 上一轮 Ctrl+C / kill 后，SRS 约需 40s 才回收 publisher；这段时间内直接 POST
+# WHIP 会被拒（whip_push 报 "HTTP 0"），白等一轮 9 秒才进重试。先等回收，
+# 让「中断后立刻重跑」也能首轮成功。
+if [ "$(publish_state)" = "true" ]; then
+  echo "WAIT_RELEASE: SRS 仍在回收 stream=$STREAM 的旧 publish 会话（最多 60s，会自动继续，请勿 Ctrl+C）..."
   wait_release || echo "WARN: SRS 60s 内未释放会话，仍继续尝试"
 fi
 

@@ -57,7 +57,7 @@
 | 系统 | AX650 (aarch64)，glibc **2.30** |
 | 摄像头 | OG05B10 5MP 鱼眼，原生 2592×1944 |
 | 采集服务 | flex_vision，启动脚本 `/opt/bin/flex_vision_run.sh`，配置 `/opt/etc/cfg_og05b10_5cam_2lan.ini` |
-| RTSP 端口 | **8554**（不是 554），通道 `axstream0` ~ `axstream4`（`chN` 会被回落到通道 0） |
+| RTSP 端口 | **8554**（不是 554），通道 `axstream0` ~ `axstream4`（`chN` 会被回落到通道 0）；开启 `[multiGrideDisplay] enable=1` 后多一路 5 合 1 拼接流 `axstream5`，见 README「5 合 1 拼接流」 |
 | GStreamer | 1.22.12，装在 `/usr/local`，环境脚本 `/etc/profile.d/gstreamer.sh` |
 
 ### 2.2 阿里云服务器
@@ -326,8 +326,9 @@ insmod /soc/ko/ax_vsync_ctrl.ko
 
 ### 7.3 多路摄像头（live0 ~ live4）—— WHIP/WebRTC 一一对应
 
-板端 5 路 RTSP 通道是 `rtsp://127.0.0.1:8554/axstream0` ~ `axstream4`
-（H.264 2592×1944@30fps，支持并发客户端）。**写 `chN` 会被服务端回落到 `axstream0`（通道 0）**，
+板端默认 5 路 RTSP 通道是 `rtsp://127.0.0.1:8554/axstream0` ~ `axstream4`
+（H.264 2592×1944@30fps，支持并发客户端）；开启 `[multiGrideDisplay] enable=1` 后另增
+5 合 1 拼接流 `axstream5`（见 README「5 合 1 拼接流」）。**写 `chN` 会被服务端回落到 `axstream0`（通道 0）**，
 服务端日志会显示 `DESCRIBE axstream0 ... playing channel 0`。
 
 `flex_srs.sh liveN` 的 N 同时是通道号与流名，全程 WHIP/WebRTC，不经 RTMP：

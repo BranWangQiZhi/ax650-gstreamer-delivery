@@ -270,7 +270,7 @@ else
   say "            装上会报 External plugin loader failed（可继续，但插件扫描会退回进程内）"
 fi
 SCRIPTS_OK=1
-for s in flex_start.sh flex_srs.sh rtp_bridge.sh flex_multi.sh rtmp_bridge.sh; do
+for s in flex_start.sh flex_srs.sh enable_grid_stream.sh rtp_bridge.sh flex_multi.sh rtmp_bridge.sh; do
   if echo "$TARLIST" | grep -qx "bin/$s"; then
     say "脚本      : bin/$s OK"
   elif board_has "$s"; then
@@ -302,7 +302,7 @@ tar -xzf "$TAR" -C "$DEST" || die "解压失败"
 # (开机脚本先落到 $DEST/etc/init.d 暂存位置, 由下面统一转装到 /etc/init.d)
 if [ -n "$LOCAL_BOARD" ]; then
   BADDED=""
-  for s in flex_start.sh flex_srs.sh rtp_bridge.sh flex_multi.sh rtmp_bridge.sh; do
+  for s in flex_start.sh flex_srs.sh enable_grid_stream.sh rtp_bridge.sh flex_multi.sh rtmp_bridge.sh; do
     if [ -f "$LOCAL_BOARD/$s" ]; then
       cp -f "$LOCAL_BOARD/$s" "$DEST/bin/$s" && chmod 755 "$DEST/bin/$s" && BADDED="$BADDED $s"
     fi

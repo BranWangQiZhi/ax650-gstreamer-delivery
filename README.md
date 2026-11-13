@@ -175,6 +175,48 @@ flex_srs.sh test              #    彩条自测，排查是环境还是码流源
 
 ---
 
+## 5 合 1 拼接流 `axstream5`（可选，默认关闭）
+
+SDK `flex_vision` 给 N 路摄像头各出一路主流（`axstream0`~`axstreamN-1`），并把缩略图拼成一张画布，
+用 VENC[N] 单独编码成 **`axstreamN`** —— 5 摄像头下就是 `rtsp://<板IP>:8554/axstream5`。
+默认 `[multiGrideDisplay] enable=0`，该通道不注册（DESCRIBE 返回 200 但 SDP 没有 `m=` 媒体行，
+播放端拉不出画面）。
+
+板端一键启用（会备份 ini、停推流、重启 `flex_vision`、验证并恢复原有 liveN 推流）：
+
+```sh
+chmod +x /usr/local/bin/enable_grid_stream.sh
+enable_grid_stream.sh enable     # 开启 axstream5
+enable_grid_stream.sh status     # 查看 enable / 8554 / axstream5 SDP / 日志
+enable_grid_stream.sh disable    # 回退
+```
+
+PC 侧一键下发（上传板端脚本 + 执行 + DESCRIBE 验证；密码交互式输入或 `BOARD_PASSWORD`
+环境变量，不落盘）：
+
+```sh
+python tools/apply_grid_stream.py                    # 默认 enable
+python tools/apply_grid_stream.py --action status   # 只体检
+python tools/apply_grid_stream.py --action disable  # 回退
+```
+
+- 画布按 `media_cfg.c` 的列数规则：**5 格 → 3 列 × 2 行**，每格 960×720，
+  合计 **2880×1440@30fps**，右下角空一格；编码格式随 `[Encode]`（当前 H.264 / 2048Kbps CBR）。
+  2026-11-13 板端实测抽帧见 [`docs/images/06_axstream5_5in1.jpg`](docs/images/06_axstream5_5in1.jpg)。
+- `[multiGrideDisplay]` 段**只有 `enable` 生效**；段内 `stream_out_mode` / `nEncoderType` /
+  `enRcMode` / `u32Bitrate` / `s32FixedQp` 是历史遗留参数，**原样保留但不被解析**。
+  真正生效的编码类型 / 码率 / 输出方式都在 `[Encode]`（`stream_out_mode` 缺省即 0=RTSP），
+  且被全部 6 路 VENC 共用 —— 单独调高码率会同时抬高 5 路主流，公网 WHIP 仍需守 2~3Mbps 上限。
+  配置段注释统一用英文，事实以 `media_cfg.c` 为准（旧注释里的 2×2 / 1920×1440 / VENC[3] 不适用 5cam）。
+- 仓库 `config/cfg_og05b10_5cam_2lan.ini` 已置 `enable=1`，2026-11-13 已把英文注释同步到板端，
+  两份 ini 去注释后逐行一致。`enable_grid_stream.sh` 平时仍只做定点修改，**不整份覆盖**
+  （避免把 sensor tuning bin 等板端差异带偏）。
+- 拼接流目前只在板端 RTSP：PC 上 `ffplay -rtsp_transport tcp rtsp://<板IP>:8554/axstream5` 可直接看。
+  `flex_srs.sh` 的通道校验仍是 0~4，要把它推到 SRS 需另行扩展通道范围。
+- ⚠️ 重启 `flex_vision` 会中断当前推流约 20~40 秒；`NO_RESTART=1` 可只改 ini 不重启。
+
+---
+
 ## 目录结构
 
 ```
@@ -209,6 +251,7 @@ gstreamer_delivery/
 | `imu_agent.sh` | `/usr/local/bin/` | IMU 采集：读 `sample_icm45686`，上报服务器 + 本地 HTTP 直连（`start/stop/status/once/sample`） |
 | `S99zimu_web` | `/etc/init.d/` | 可选：开机自启 `imu_agent.sh`（排在 S98imu / S99zflex_start 之后） |
 | `flex_srs.sh` | `/usr/local/bin/` | ★ 生产：`liveN → axstreamN` 一一对应（也支持 `start liveN`），WHIP/WebRTC 直推；支持多路并存 / `stop` / `status` / `test`，内置源帧率检查、端口僵尸清理、中断自清理、会话回收、桥守护、假连接检测 |
+| `enable_grid_stream.sh` | `/usr/local/bin/` | 可选：启用/关闭 5 合 1 拼接流 `axstream5`（备份 ini + 重启 flex_vision + 验证 SDP + 恢复推流，`enable / disable / status`） |
 | `rtp_bridge.sh` | `/usr/local/bin/` | ★ RTP 桥守护：ffmpeg RTSP→UDP `5200+2*N`，每路一个、断开自动重连（不要直接裸跑 ffmpeg） |
 | `rtmp_bridge.sh` | `/usr/local/bin/` | RTMP 桥守护（备选）：ffmpeg 把 RTSP 原样封 FLV 直推 SRS 1935；本项目主链路不用 |
 | `flex_multi.sh` | `/usr/local/bin/` | RTMP 多路管理（备选）：`axstreamN → liveN`，`start / stop / status`；本项目主链路不用 |
